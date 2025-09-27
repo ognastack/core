@@ -1,0 +1,57 @@
+_format_version: "3.0"
+_transform: true
+
+consumers:
+  - username: ogna-user
+    jwt_secrets:
+      - key: authenticated # This must match GoTrue JWT 'aud'
+        secret: superlongjwtsecret # The same JWT secret GoTrue uses
+        algorithm: HS256
+
+services:
+  # GoTrue (Supabase Auth)
+  - name: gotrue-service
+    url: http://gotrue:9999
+    routes:
+      - name: gotrue-route
+        paths:
+          - /auth
+    # 🔹 No rate limit here for public signup/signin
+
+  # FastAPI backend
+  - name: api-service
+    url: http://api:8000
+    routes:
+      - name: api-route
+        paths:
+          - /api
+    plugins:
+      - name: jwt
+        config:
+          claims_to_verify:
+            - exp # only verify expiration
+          key_claim_name: aud # optional: use 'aud' as the key if needed
+      - name: rate-limiting
+        config:
+          second: 5 # max 5 requests per second
+          minute: 100 # max 100 requests per minute
+          policy: local # uses Kong node memory, good for single instance
+
+  # PostgREST service
+  - name: postgrest-service
+    url: http://postgrest:3000
+    routes:
+      - name: postgrest-route
+        paths:
+          - /rpc
+    plugins:
+      - name: jwt
+        config:
+          claims_to_verify:
+            - exp # only verify expiration
+          key_claim_name: aud # optional: use 'aud' as the key if needed
+      - name: rate-limiting
+        config:
+          second: 3 # max 3 requests per second
+          minute: 60 # max 60 requests per minute
+          policy: local
