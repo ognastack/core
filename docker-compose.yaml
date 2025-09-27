@@ -1,0 +1,138 @@
+x-kong-config: &kong-env
+  KONG_DATABASE: postgres # Use Postgres as the backing database
+  KONG_PG_HOST: ogna-database # Hostname of the Postgres service
+  KONG_PG_DATABASE: ogna_db # Name of the database to connect to
+  KONG_PG_USER: ogna_user # Database username
+  KONG_PG_PASSWORD: supersecretpassword # Database password
+
+services:
+  kong-bootstrap:
+    image: kong/kong-gateway:3.11.0.3
+    container_name: kong-bootstrap
+    networks:
+      - ogna
+    depends_on:
+      ogna-database:
+        condition: service_healthy
+    restart: on-failure
+    environment:
+      <<: *kong-env
+      KONG_PASSWORD: handyshake
+    command: kong migrations bootstrap
+
+  kong-cp:
+    image: kong/kong-gateway:3.11.0.3
+    container_name: kong-cp
+    restart: on-failure
+    networks:
+      - ogna
+    environment:
+      <<: *kong-env
+      KONG_ADMIN_LISTEN: 0.0.0.0:8001, 0.0.0.0:8444 ssl
+      KONG_ADMIN_GUI_LISTEN: 0.0.0.0:8002, 0.0.0.0:8445 ssl
+      KONG_ADMIN_GUI_URL: http://localhost:8002
+      KONG_PASSWORD: handyshake
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /kong/kong.yaml
+    depends_on:
+      kong-bootstrap:
+        condition: service_completed_successfully
+    ports:
+      - "8000:8000"
+      - "8443:8443"
+      - "8001:8001"
+      - "8444:8444"
+      - "8002:8002"
+      - "8445:8445"
+    volumes:
+      - ./config/kong.yaml:/kong/kong.yaml:ro
+
+  gotrue:
+    image: supabase/auth:v2.180.0
+    environment:
+      GOTRUE_DISABLE_SIGNUP: false
+      GOTRUE_MAILER_AUTOCONFIRM: true
+      API_EXTERNAL_URL: "http://localhost:9999"
+      GOTRUE_API_HOST: "0.0.0.0"
+      GOTRUE_API_PORT: 9999
+      GOTRUE_DB_DRIVER: "postgres"
+      GOTRUE_JWT_AUD: "authenticated"
+      GOTRUE_JWT_DEFAULT_GROUP_NAME: "authenticated"
+
+    env_file:
+      - ./gotrue.env
+    expose:
+      - "9999"
+    depends_on:
+      ogna-database:
+        condition: service_healthy
+    networks:
+      - ogna
+
+  postgrest:
+    image: postgrest/postgrest:v13.0.7
+    container_name: postgrest
+    depends_on:
+      ogna-database:
+        condition: service_healthy
+    environment:
+      PGRST_DB_URI: postgres://ogna_user:supersecretpassword@ogna-database:5432/ogna_db
+      PGRST_DB_ANON_ROLE: web_anon
+      PGRST_SERVER_PORT: 3000
+    networks:
+      - ogna
+    expose:
+      - "3000"
+
+  ogna-database:
+    image: postgres:15
+    env_file:
+      - ./secrets.env
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./migrations/init:/docker-entrypoint-initdb.d
+    expose:
+      - "5432"
+    networks:
+      - ogna
+    healthcheck:
+      test: ["CMD", "pg_isready", "-U", "ogna_user", "-d", "ogna_db"]
+      interval: 5s
+      timeout: 10s
+      retries: 10
+    ports:
+      - "5432:5432"
+
+  flyway:
+    image: flyway/flyway:10
+    container_name: flyway_migrate
+    depends_on:
+      ogna-database:
+        condition: service_healthy
+    command: -url=jdbc:postgresql://ogna-database:5432/ogna_db -user=ogna_user -password=supersecretpassword -schemas=migrations migrate
+    networks:
+      - ogna
+    volumes:
+      - ./migrations/post:/flyway/sql
+    restart: on-failure:20
+
+  api:
+    image: ogna-py-appi:dev
+    container_name: api
+    restart: unless-stopped # Add restart policy
+    depends_on:
+      ogna-database:
+        condition: service_healthy
+      kong-cp:
+        condition: service_healthy
+    expose:
+      - "8000"
+    networks:
+      - ogna
+
+volumes:
+  postgres_data:
+
+networks:
+  ogna:
+    driver: bridge
