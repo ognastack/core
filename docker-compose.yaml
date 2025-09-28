@@ -6,20 +6,6 @@ x-kong-config: &kong-env
   KONG_PG_PASSWORD: supersecretpassword # Database password
 
 services:
-  kong-bootstrap:
-    image: kong/kong-gateway:3.11.0.3
-    container_name: kong-bootstrap
-    networks:
-      - ogna
-    depends_on:
-      ogna-database:
-        condition: service_healthy
-    restart: on-failure
-    environment:
-      <<: *kong-env
-      KONG_PASSWORD: handyshake
-    command: kong migrations bootstrap
-
   kong-cp:
     image: kong/kong-gateway:3.11.0.3
     container_name: kong-cp
@@ -35,8 +21,7 @@ services:
       KONG_DATABASE: "off"
       KONG_DECLARATIVE_CONFIG: /kong/kong.yaml
     depends_on:
-      kong-bootstrap:
-        condition: service_completed_successfully
+      - gotrue
     ports:
       - "8000:8000"
       - "8443:8443"
@@ -48,17 +33,19 @@ services:
       - ./config/kong.yaml:/kong/kong.yaml:ro
 
   gotrue:
-    image: supabase/auth:v2.180.0
+    image: bitnami/gotrue:2.178.0
+    platform: linux/amd64
     environment:
       GOTRUE_DISABLE_SIGNUP: false
       GOTRUE_MAILER_AUTOCONFIRM: true
+      MAILER_AUTOCONFIRM: true
       API_EXTERNAL_URL: "http://localhost:9999"
       GOTRUE_API_HOST: "0.0.0.0"
       GOTRUE_API_PORT: 9999
       GOTRUE_DB_DRIVER: "postgres"
       GOTRUE_JWT_AUD: "authenticated"
       GOTRUE_JWT_DEFAULT_GROUP_NAME: "authenticated"
-
+      GOTRUE_SITE_URL: "https://api.mydomain.com"
     env_file:
       - ./gotrue.env
     expose:
@@ -117,14 +104,12 @@ services:
     restart: on-failure:20
 
   api:
-    image: ogna-py-appi:dev
+    image: ogna-py-appi:prod
     container_name: api
     restart: unless-stopped # Add restart policy
     depends_on:
-      ogna-database:
-        condition: service_healthy
-      kong-cp:
-        condition: service_healthy
+      - ogna-database
+      - kong-cp
     expose:
       - "8000"
     networks:

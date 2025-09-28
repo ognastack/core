@@ -29,7 +29,7 @@ services:
       - name: jwt
         config:
           claims_to_verify:
-            - exp # only verify expiration
+            - exp
           key_claim_name: aud # optional: use 'aud' as the key if needed
       - name: rate-limiting
         config:
