@@ -13,12 +13,14 @@ class TesApiHealth(unittest.TestCase):
         self.sign_in = f"{self.base_url}/auth/token?grant_type=password"
 
         self.health = f"{self.base_url}/api/v1/health/"
+
+        self.check = f"{self.base_url}/api/v1/check/"
         self.headers = {
             "Content-Type": "application/json"
         }
 
         email = f"{str(uuid.uuid4())}@example.com"
-        payload = {
+        self.payload = {
             "email": email,
             "password": "strongpassword"
         }
@@ -26,7 +28,7 @@ class TesApiHealth(unittest.TestCase):
         response = requests.post(
             self.signup_url,
             headers=self.headers,
-            data=json.dumps(payload)
+            data=json.dumps(self.payload)
         )
 
         # Assert successful response
@@ -40,13 +42,12 @@ class TesApiHealth(unittest.TestCase):
         self.assertIn("email", response_use)
         self.assertEqual(response_use["email"], email)
 
-        response_sign_in = requests.post(self.sign_in, headers=self.headers, json=payload)
+        response_sign_in = requests.post(self.sign_in, headers=self.headers, json=self.payload)
 
         self.assertIn("access_token", response_sign_in.json())
 
         access_token = response_sign_in.json()["access_token"]
 
-        print(access_token)
         # Create session
         self.session = requests.session()
 
@@ -63,11 +64,25 @@ class TesApiHealth(unittest.TestCase):
 
         self.assertEqual(result.status_code, 200)
 
+    def test_succesful_check_auth_call(self):
+        """Test successful user signup"""
+
+        result = self.session.get(url=self.check)
+
+        self.assertEqual(200, result.status_code)
+
+        response_sign_in = requests.post(self.sign_in, headers=self.headers, json=self.payload)
+
+        self.assertIn("access_token", response_sign_in.json())
+
+        result = self.session.get(url=self.check)
+
+        self.assertEqual(200, result.status_code)
+
     def test_no_login_call(self):
         """Test successful user signup"""
 
         result = requests.get(url=self.health)
-        print(result.json())
         self.assertEqual(result.status_code, 401)
 
     def tearDown(self):

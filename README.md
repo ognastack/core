@@ -1,6 +1,6 @@
 # OGNA Backend Stack
 
-This project is a **microservices backend architecture** using **Kong**, **GoTrue (Supabase Auth)**, **FastAPI**, **PostgREST**, and **Postgres**, with JWT authentication and rate-limiting for secure and scalable APIs.
+This project is a **microservices backend architecture** using **Kong**, **GoTrue (Supabase Auth)**, **FastAPI** and **Postgres**, with JWT authentication and rate-limiting for secure and scalable APIs.
 
 ---
 
@@ -25,7 +25,6 @@ This backend stack provides:
 - Centralized **API gateway** using Kong
 - Authentication and JWT issuance via **GoTrue**
 - Business logic through **FastAPI**
-- Database-level REST APIs and RPCs via **PostgREST**
 - **Postgres** as the main database
 - **Rate limiting** per service to protect APIs
 - Declarative configuration for Kong and JWT consumers
@@ -39,11 +38,11 @@ Frontend
    |
    v
 [Kong API Gateway]
-   |          |
-   v          v
-FastAPI      PostgREST
-  |             |
-  v             v
+   |
+   v
+FastAPI
+  |
+  v
  Postgres DB (shared)
       ^
       |
@@ -51,7 +50,6 @@ FastAPI      PostgREST
 ```
 
 - All `/api` requests → FastAPI (JWT protected)
-- All `/rpc` requests → PostgREST (JWT protected)
 - `/auth` requests → GoTrue (signup/login, public)
 - Kong handles routing, JWT validation, and rate limiting
 
@@ -59,13 +57,12 @@ FastAPI      PostgREST
 
 ## Services
 
-| Service   | Description                            | Port      |
-| --------- | -------------------------------------- | --------- |
-| Kong      | API Gateway, routes and JWT validation | 8000/8001 |
-| GoTrue    | Authentication & JWT management        | 9999      |
-| FastAPI   | Application backend                    | 8000      |
-| PostgREST | Database REST API & RPCs               | 3000      |
-| Postgres  | Database storage                       | 5432      |
+| Service  | Description                            | Port      |
+| -------- | -------------------------------------- | --------- |
+| Kong     | API Gateway, routes and JWT validation | 8000/8001 |
+| GoTrue   | Authentication & JWT management        | 9999      |
+| FastAPI  | Application backend                    | 8000      |
+| Postgres | Database storage                       | 5432      |
 
 ---
 
@@ -132,11 +129,11 @@ Start all services with Docker Compose:
 docker-compose up -d
 ```
 
-Check logs for Kong, FastAPI, or PostgREST:
+Check logs for Kong or FastAPI
 
 ```bash
 docker-compose logs -f kong-cp
-docker-compose logs -f postgrest
+docker-compose logs -f api
 ```
 
 Stop the stack:
@@ -149,11 +146,10 @@ docker-compose down
 
 ## Endpoints
 
-| Route    | Service   | Description                    | JWT Required |
-| -------- | --------- | ------------------------------ | ------------ |
-| `/auth`  | GoTrue    | Signup, login, user management | No           |
-| `/api/*` | FastAPI   | Application backend endpoints  | Yes          |
-| `/rpc/*` | PostgREST | Database RPC endpoints         | Yes          |
+| Route    | Service | Description                    | JWT Required |
+| -------- | ------- | ------------------------------ | ------------ |
+| `/auth`  | GoTrue  | Signup, login, user management | No           |
+| `/api/*` | FastAPI | Application backend endpoints  | Yes          |
 
 ---
 
@@ -162,7 +158,6 @@ docker-compose down
 - **Kong** is configured declaratively in `config/kong.yaml`
 - **JWT validation** checks token expiration; `iss` and `aud` verification can be skipped for dev
 - **Rate limiting** is applied per service in Kong
-- **PostgREST** uses pinned version `11.2.0`
 - **GoTrue** uses `GOTRUE_SITE_URL` and `GOTRUE_JWT_AUD` for JWT claims
 - Any backend service can be swapped by changing the Docker image under the `api` service
 
