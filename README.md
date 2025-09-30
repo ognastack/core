@@ -112,10 +112,9 @@ git clone <repo-url>
 cd <repo-folder>
 ```
 
-2. Create `.env` files:
+2. Create `.env` file:
 
-- `gotrue.env` → GoTrue environment variables
-- `secrets.env` → Postgres username/password
+- `.env` → Database and GoTrue secrets
 
 3. Ensure migrations are in `./migrations` folder for Flyway and Postgres initialization
 

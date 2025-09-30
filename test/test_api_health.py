@@ -79,6 +79,8 @@ class TesApiHealth(unittest.TestCase):
 
         self.assertEqual(200, result.status_code)
 
+        print(result.json())
+
     def test_no_login_call(self):
         """Test successful user signup"""
 
