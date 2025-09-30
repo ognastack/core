@@ -31,6 +31,8 @@ services:
       - "8445:8445"
     volumes:
       - ./config/kong.yaml:/kong/kong.yaml:ro
+    env_file:
+      - .env
 
   gotrue:
     image: bitnami/gotrue:2.178.0
@@ -46,8 +48,6 @@ services:
       GOTRUE_JWT_AUD: "authenticated"
       GOTRUE_JWT_DEFAULT_GROUP_NAME: "authenticated"
       GOTRUE_SITE_URL: "https://api.mydomain.com"
-    env_file:
-      - ./gotrue.env
     expose:
       - "9999"
     depends_on:
@@ -55,26 +55,11 @@ services:
         condition: service_healthy
     networks:
       - ogna
-
-  postgrest:
-    image: postgrest/postgrest:v13.0.7
-    container_name: postgrest
-    depends_on:
-      ogna-database:
-        condition: service_healthy
-    environment:
-      PGRST_DB_URI: postgres://ogna_user:supersecretpassword@ogna-database:5432/ogna_db
-      PGRST_DB_ANON_ROLE: web_anon
-      PGRST_SERVER_PORT: 3000
-    networks:
-      - ogna
-    expose:
-      - "3000"
+    env_file:
+      - .env
 
   ogna-database:
     image: postgres:15
-    env_file:
-      - ./secrets.env
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./migrations/init:/docker-entrypoint-initdb.d
@@ -89,6 +74,8 @@ services:
       retries: 10
     ports:
       - "5432:5432"
+    env_file:
+      - .env
 
   flyway:
     image: flyway/flyway:10
@@ -96,12 +83,18 @@ services:
     depends_on:
       ogna-database:
         condition: service_healthy
-    command: -url=jdbc:postgresql://ogna-database:5432/ogna_db -user=ogna_user -password=supersecretpassword -schemas=migrations migrate
+    command: >
+      -url=jdbc:postgresql://ogna-database:5432/${POSTGRES_DB}
+      -user=${POSTGRES_USER}
+      -password=${POSTGRES_PASSWORD}
+      -schemas=migrations migrate
     networks:
       - ogna
     volumes:
       - ./migrations/post:/flyway/sql
     restart: on-failure:20
+    env_file:
+      - .env
 
   api:
     image: ogna-py-appi:prod
@@ -114,6 +107,8 @@ services:
       - "8000"
     networks:
       - ogna
+    env_file:
+      - .env
 
 volumes:
   postgres_data:
