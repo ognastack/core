@@ -96,20 +96,6 @@ services:
     env_file:
       - .env
 
-  api:
-    image: ogna-py-appi:prod
-    container_name: api
-    restart: unless-stopped # Add restart policy
-    depends_on:
-      - ogna-database
-      - kong-cp
-    expose:
-      - "8000"
-    networks:
-      - ogna
-    env_file:
-      - .env
-
 volumes:
   postgres_data:
 
