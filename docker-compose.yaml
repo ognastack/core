@@ -6,8 +6,22 @@ x-kong-config: &kong-env
   KONG_PG_PASSWORD: supersecretpassword # Database password
 
 services:
+  kong-bootstrap:
+    image: "${GW_IMAGE:-kong/kong-gateway:3.12.0.0}" # Kong Gateway image (default to latest version)
+    container_name: kong-bootstrap
+    networks:
+      - ogna
+    depends_on:
+      ogna-database:
+        condition: service_healthy
+    restart: on-failure
+    environment:
+      <<: *kong-env # Reuse environment config from x-kong-config
+      KONG_PASSWORD: handyshake # Admin GUI password (required for RBAC)
+    command: kong migrations bootstrap # Run DB migrations to initialize Kong schema
+
   kong-cp:
-    image: kong/kong-gateway:3.11.0.3
+    image: kong/kong-gateway:3.12.0.0
     container_name: kong-cp
     restart: on-failure
     networks:
@@ -18,10 +32,10 @@ services:
       KONG_ADMIN_GUI_LISTEN: 0.0.0.0:8002, 0.0.0.0:8445 ssl
       KONG_ADMIN_GUI_URL: http://localhost:8002
       KONG_PASSWORD: handyshake
-      KONG_DATABASE: "off"
       KONG_DECLARATIVE_CONFIG: /kong/kong.yaml
     depends_on:
-      - gotrue
+      kong-bootstrap:
+        condition: service_completed_successfully # Start only after bootstrap has succeeded
     ports:
       - "8000:8000"
       - "8443:8443"
