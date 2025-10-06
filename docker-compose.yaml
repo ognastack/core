@@ -37,12 +37,8 @@ services:
       kong-bootstrap:
         condition: service_completed_successfully # Start only after bootstrap has succeeded
     ports:
-      - "8000:8000"
-      - "8443:8443"
-      - "8001:8001"
-      - "8444:8444"
-      - "8002:8002"
-      - "8445:8445"
+      - "80:8000"
+      - "443:8443"
     volumes:
       - ./config/kong.yaml:/kong/kong.yaml:ro
     env_file:
