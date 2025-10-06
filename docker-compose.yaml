@@ -37,7 +37,7 @@ services:
       kong-bootstrap:
         condition: service_completed_successfully # Start only after bootstrap has succeeded
     ports:
-      - "8000:8000"
+      - "80:8000"
       - "8443:8443"
       - "8001:8001"
       - "8444:8444"
