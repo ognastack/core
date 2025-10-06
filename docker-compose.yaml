@@ -46,7 +46,7 @@ services:
       - .env
 
   gotrue:
-    image: bitnami/gotrue:2.178.0
+    image: bitnami/gotrue:latest
     platform: linux/amd64
     environment:
       GOTRUE_DISABLE_SIGNUP: false
