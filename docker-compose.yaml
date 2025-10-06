@@ -41,6 +41,7 @@ services:
       - "443:8443"
     volumes:
       - ./config/kong.yaml:/kong/kong.yaml:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
     env_file:
       - .env
 
