@@ -33,7 +33,8 @@ services:
       KONG_ADMIN_GUI_LISTEN: 0.0.0.0:8002, 0.0.0.0:8445 ssl
       KONG_ADMIN_GUI_URL: http://localhost:8002
       KONG_PASSWORD: handyshake
-      KONG_DECLARATIVE_CONFIG: /kong/kong.yaml
+      KONG_LUA_SSL_TRUSTED_CERTIFICATE: system
+      KONG_NGINX_HTTP_LUA_SHARED_DICT: acme_storage 10m
     depends_on:
       kong-bootstrap:
         condition: service_completed_successfully # Start only after bootstrap has succeeded
@@ -108,6 +109,7 @@ services:
 
 volumes:
   postgres_data:
+  acme_storage:
 
 networks:
   ogna:
