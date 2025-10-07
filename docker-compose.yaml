@@ -41,7 +41,7 @@ services:
       - "443:8443"
     volumes:
       - ./config/kong.yaml:/kong/kong.yaml:ro
-      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - /certs:/etc/letsencrypt:ro
     env_file:
       - .env
 
@@ -83,8 +83,6 @@ services:
       interval: 5s
       timeout: 10s
       retries: 10
-    ports:
-      - "5432:5432"
     env_file:
       - .env
 
