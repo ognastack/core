@@ -41,12 +41,12 @@ services:
       - "443:8443"
     volumes:
       - ./config/kong.yaml:/kong/kong.yaml:ro
-      - /etc/letsencrypt:/etc/letsencrypt:ro
+      - ./certs:/etc/letsencrypt/certs:ro
     env_file:
       - .env
 
   gotrue:
-    image: bitnami/gotrue:latest
+    image: bitnamilegacy/gotrue:2.178.0
     platform: linux/amd64
     environment:
       GOTRUE_DISABLE_SIGNUP: false
