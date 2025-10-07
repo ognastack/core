@@ -41,7 +41,7 @@ services:
       - "443:8443"
     volumes:
       - ./config/kong.yaml:/kong/kong.yaml:ro
-      - /certs:/etc/letsencrypt:ro
+      - ./acme:/usr/local/kong/acme
     env_file:
       - .env
 

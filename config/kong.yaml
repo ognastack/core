@@ -16,7 +16,6 @@ services:
       - name: gotrue-route
         paths:
           - /auth
-    # 🔹 No rate limit here for public signup/signin
 
   # FastAPI backend
   - name: api-service
@@ -72,3 +71,12 @@ plugins:
         - Authorization
         - Content-Type
       credentials: true
+  - name: acme
+    config:
+      account_email: "ognastack@gmail.com"
+      tos_accepted: true
+      api_uri: "https://acme-v02.api.letsencrypt.org/directory"
+      storage: file
+      storage_config:
+        path: /usr/local/kong/acme
+      allow_any_domain: true
