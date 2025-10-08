@@ -81,4 +81,3 @@ plugins:
       storage: "kong"
       tos_accepted: true
       renew_threshold_days: 30
-      ca: "https://acme-v02.api.letsencrypt.org/directory"
