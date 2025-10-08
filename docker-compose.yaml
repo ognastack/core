@@ -38,6 +38,11 @@ services:
     depends_on:
       kong-bootstrap:
         condition: service_completed_successfully # Start only after bootstrap has succeeded
+    healthcheck:
+      test: ["CMD", "kong", "health"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
     ports:
       - "80:8000"
       - "443:8443"
