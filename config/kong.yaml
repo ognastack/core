@@ -16,7 +16,6 @@ services:
       - name: gotrue-route
         paths:
           - /auth
-    # 🔹 No rate limit here for public signup/signin
 
   # FastAPI backend
   - name: api-service
@@ -72,3 +71,13 @@ plugins:
         - Authorization
         - Content-Type
       credentials: true
+  - name: acme
+    config:
+      account_email: "ognastack@gmail.com"
+      domains:
+        - "ognastack.com"
+        - "www.ognastack.com"
+        - "api.ognastack.com"
+      storage: "kong"
+      tos_accepted: true
+      renew_threshold_days: 30

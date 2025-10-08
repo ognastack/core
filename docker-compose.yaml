@@ -28,20 +28,27 @@ services:
       - ogna
     environment:
       <<: *kong-env
+      KONG_PLUGINS: bundled,acme,cors
       KONG_ADMIN_LISTEN: 0.0.0.0:8001, 0.0.0.0:8444 ssl
       KONG_ADMIN_GUI_LISTEN: 0.0.0.0:8002, 0.0.0.0:8445 ssl
       KONG_ADMIN_GUI_URL: http://localhost:8002
       KONG_PASSWORD: handyshake
-      KONG_DECLARATIVE_CONFIG: /kong/kong.yaml
+      KONG_LUA_SSL_TRUSTED_CERTIFICATE: system
+      KONG_NGINX_HTTP_LUA_SHARED_DICT: acme_storage 10m
     depends_on:
       kong-bootstrap:
         condition: service_completed_successfully # Start only after bootstrap has succeeded
+    healthcheck:
+      test: ["CMD", "kong", "health"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
     ports:
       - "80:8000"
       - "443:8443"
     volumes:
       - ./config/kong.yaml:/kong/kong.yaml:ro
-      - /certs:/etc/letsencrypt:ro
+      - ./acme:/usr/local/kong/acme
     env_file:
       - .env
 
@@ -107,6 +114,7 @@ services:
 
 volumes:
   postgres_data:
+  acme_storage:
 
 networks:
   ogna:
