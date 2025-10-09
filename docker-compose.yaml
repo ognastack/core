@@ -42,6 +42,8 @@ services:
         condition: service_completed_successfully
       ogna-database:
         condition: service_healthy
+    expose:
+      - "8001"
     healthcheck:
       test: ["CMD", "kong", "health"]
       interval: 10s
