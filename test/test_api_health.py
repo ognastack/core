@@ -8,7 +8,7 @@ class TesApiHealth(unittest.TestCase):
 
     def setUp(self):
         """Set up test fixtures before each test method"""
-        self.base_url = "http://localhost:8000"
+        self.base_url = "http://localhost"
         self.signup_url = f"{self.base_url}/auth/signup"
         self.sign_in = f"{self.base_url}/auth/token?grant_type=password"
 
@@ -31,8 +31,9 @@ class TesApiHealth(unittest.TestCase):
             data=json.dumps(self.payload)
         )
 
+        print(response.json())
         # Assert successful response
-        self.assertEqual(response.status_code, 200)  # Or 200 depending on your API
+        self.assertEqual(200, response.status_code)  # Or 200 depending on your API
 
         # Check response content (adjust based on your API response)
         response_data = response.json()

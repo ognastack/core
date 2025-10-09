@@ -9,7 +9,6 @@ consumers:
         algorithm: HS256
 
 services:
-  # GoTrue (Supabase Auth)
   - name: gotrue-service
     url: http://gotrue:9999
     routes:
@@ -35,25 +34,6 @@ services:
           second: 5 # max 5 requests per second
           minute: 100 # max 100 requests per minute
           policy: local # uses Kong node memory, good for single instance
-
-  # PostgREST service
-  - name: postgrest-service
-    url: http://postgrest:3000
-    routes:
-      - name: postgrest-route
-        paths:
-          - /rpc
-    plugins:
-      - name: jwt
-        config:
-          claims_to_verify:
-            - exp # only verify expiration
-          key_claim_name: aud # optional: use 'aud' as the key if needed
-      - name: rate-limiting
-        config:
-          second: 3 # max 3 requests per second
-          minute: 60 # max 60 requests per minute
-          policy: local
 
 plugins:
   - name: cors
