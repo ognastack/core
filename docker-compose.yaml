@@ -1,13 +1,13 @@
 x-kong-config: &kong-env
   KONG_DATABASE: postgres # Use Postgres as the backing database
   KONG_PG_HOST: ogna-database # Hostname of the Postgres service
-  KONG_PG_DATABASE: ogna_db # Name of the database to connect to
-  KONG_PG_USER: ogna_user # Database username
-  KONG_PG_PASSWORD: supersecretpassword # Database password
+  KONG_PG_DATABASE: ${POSTGRES_DB} # Name of the database to connect to
+  KONG_PG_USER: ${POSTGRES_USER} # Database username
+  KONG_PG_PASSWORD: ${POSTGRES_PASSWORD} # Database password
 
 services:
   kong-bootstrap:
-    image: "${GW_IMAGE:-kong/kong-gateway:3.12.0.0}" # Kong Gateway image (default to latest version)
+    image: kong/kong-gateway:3.12.0.0 # Kong Gateway image (default to latest version)
     container_name: kong-bootstrap
     networks:
       - ogna
@@ -23,26 +23,31 @@ services:
   kong-cp:
     image: kong/kong-gateway:3.12.0.0
     container_name: kong-cp
-    restart: on-failure
+    restart: unless-stopped
     networks:
       - ogna
     environment:
       <<: *kong-env
-      KONG_PLUGINS: bundled,acme,cors
-      KONG_ADMIN_LISTEN: 0.0.0.0:8001, 0.0.0.0:8444 ssl
-      KONG_ADMIN_GUI_LISTEN: 0.0.0.0:8002, 0.0.0.0:8445 ssl
-      KONG_ADMIN_GUI_URL: http://localhost:8002
-      KONG_PASSWORD: handyshake
+      KONG_PLUGINS: bundled,cors,acme
       KONG_LUA_SSL_TRUSTED_CERTIFICATE: system
       KONG_NGINX_HTTP_LUA_SHARED_DICT: acme_storage 10m
+      # Logging (optional but recommended)
+      KONG_PROXY_ACCESS_LOG: /dev/stdout
+      KONG_ADMIN_ACCESS_LOG: /dev/stdout
+      KONG_PROXY_ERROR_LOG: /dev/stderr
+      KONG_ADMIN_ERROR_LOG: /dev/stderr
+      KONG_LOG_LEVEL: ${KONG_LOG_LEVEL:-notice}
     depends_on:
       kong-bootstrap:
-        condition: service_completed_successfully # Start only after bootstrap has succeeded
+        condition: service_completed_successfully
+      ogna-database:
+        condition: service_healthy
     healthcheck:
       test: ["CMD", "kong", "health"]
       interval: 10s
       timeout: 10s
       retries: 10
+      start_period: 30s # Give Kong time to start
     ports:
       - "80:8000"
       - "443:8443"
@@ -59,13 +64,13 @@ services:
       GOTRUE_DISABLE_SIGNUP: false
       GOTRUE_MAILER_AUTOCONFIRM: true
       MAILER_AUTOCONFIRM: true
-      API_EXTERNAL_URL: "http://localhost:9999"
       GOTRUE_API_HOST: "0.0.0.0"
       GOTRUE_API_PORT: 9999
       GOTRUE_DB_DRIVER: "postgres"
       GOTRUE_JWT_AUD: "authenticated"
       GOTRUE_JWT_DEFAULT_GROUP_NAME: "authenticated"
-      GOTRUE_SITE_URL: "https://api.mydomain.com"
+      GOTRUE_SITE_URL: "http://localhost"
+      DATABASE_URL: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@ogna-database:5432/${POSTGRES_DB}?search_path=auth"
     expose:
       - "9999"
     depends_on:
@@ -86,10 +91,16 @@ services:
     networks:
       - ogna
     healthcheck:
-      test: ["CMD", "pg_isready", "-U", "ogna_user", "-d", "ogna_db"]
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-ogna_user} -d ${POSTGRES_DB:-ogna_db}",
+        ]
       interval: 5s
       timeout: 10s
       retries: 10
+      start_period: 10s
+    restart: unless-stopped
     env_file:
       - .env
 
@@ -114,7 +125,7 @@ services:
 
 volumes:
   postgres_data:
-  acme_storage:
+    driver: local
 
 networks:
   ogna:
