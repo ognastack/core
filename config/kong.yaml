@@ -41,6 +41,8 @@ plugins:
       origins:
         - http://localhost:3000
         - http://127.0.0.1:3000
+        - http://localhost:5173
+        - http://127.0.0.1:5173
       methods:
         - GET
         - POST
@@ -51,13 +53,4 @@ plugins:
         - Authorization
         - Content-Type
       credentials: true
-  - name: acme
-    config:
-      account_email: "ognastack@gmail.com"
-      domains:
-        - "ognastack.com"
-        - "www.ognastack.com"
-        - "api.ognastack.com"
-      storage: "kong"
-      tos_accepted: true
-      renew_threshold_days: 30
+

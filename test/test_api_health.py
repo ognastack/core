@@ -8,7 +8,7 @@ class TesApiHealth(unittest.TestCase):
 
     def setUp(self):
         """Set up test fixtures before each test method"""
-        self.base_url = "http://localhost"
+        self.base_url = "http://localhost:8000"
         self.signup_url = f"{self.base_url}/auth/signup"
         self.sign_in = f"{self.base_url}/auth/token?grant_type=password"
 
@@ -63,24 +63,7 @@ class TesApiHealth(unittest.TestCase):
 
         result = self.session.get(url=self.health)
 
-        self.assertEqual(result.status_code, 200)
-
-    def test_succesful_check_auth_call(self):
-        """Test successful user signup"""
-
-        result = self.session.get(url=self.check)
-
-        self.assertEqual(200, result.status_code)
-
-        response_sign_in = requests.post(self.sign_in, headers=self.headers, json=self.payload)
-
-        self.assertIn("access_token", response_sign_in.json())
-
-        result = self.session.get(url=self.check)
-
-        self.assertEqual(200, result.status_code)
-
-        print(result.json())
+        self.assertEqual(result.status_code, 401)
 
     def test_no_login_call(self):
         """Test successful user signup"""

@@ -6,19 +6,6 @@ x-kong-config: &kong-env
   KONG_PG_PASSWORD: ${POSTGRES_PASSWORD} # Database password
 
 services:
-  kong-bootstrap:
-    image: kong/kong-gateway:3.12.0.0 # Kong Gateway image (default to latest version)
-    container_name: kong-bootstrap
-    networks:
-      - ogna
-    depends_on:
-      ogna-database:
-        condition: service_healthy
-    restart: on-failure
-    environment:
-      <<: *kong-env # Reuse environment config from x-kong-config
-      KONG_PASSWORD: handyshake # Admin GUI password (required for RBAC)
-    command: kong migrations bootstrap # Run DB migrations to initialize Kong schema
 
   kong-cp:
     image: kong/kong-gateway:3.12.0.0
@@ -36,10 +23,9 @@ services:
       KONG_PROXY_ERROR_LOG: /dev/stderr
       KONG_ADMIN_ERROR_LOG: /dev/stderr
       KONG_LOG_LEVEL: ${KONG_LOG_LEVEL:-notice}
-      KONG_ADMIN_LISTEN: 0.0.0.0:8001, 0.0.0.0:8444 ssl
+      KONG_DATABASE: "off"
+      KONG_DECLARATIVE_CONFIG: /kong/kong.yaml
     depends_on:
-      kong-bootstrap:
-        condition: service_completed_successfully
       ogna-database:
         condition: service_healthy
     expose:
@@ -51,11 +37,10 @@ services:
       retries: 10
       start_period: 30s # Give Kong time to start
     ports:
-      - "80:8000"
+      - "8000:8000"
       - "443:8443"
     volumes:
       - ./config/kong.yaml:/kong/kong.yaml:ro
-      - ./acme:/usr/local/kong/acme
     env_file:
       - .env
 
