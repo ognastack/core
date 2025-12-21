@@ -13,9 +13,9 @@ services:
     restart: unless-stopped
     networks:
       - ogna
+      - tokens
     environment:
-      <<: *kong-env
-      KONG_PLUGINS: bundled,cors,acme
+      KONG_PLUGINS: bundled,cors,acme,jwt-blacklist
       KONG_LUA_SSL_TRUSTED_CERTIFICATE: system
       KONG_NGINX_HTTP_LUA_SHARED_DICT: acme_storage 10m
       KONG_PROXY_ACCESS_LOG: /dev/stdout
@@ -25,9 +25,6 @@ services:
       KONG_LOG_LEVEL: ${KONG_LOG_LEVEL:-notice}
       KONG_DATABASE: "off"
       KONG_DECLARATIVE_CONFIG: /kong/kong.yaml
-    depends_on:
-      ogna-database:
-        condition: service_healthy
     expose:
       - "8001"
     healthcheck:
@@ -40,9 +37,12 @@ services:
       - "8000:8000"
       - "443:8443"
     volumes:
-      - ./config/kong.yaml:/kong/kong.yaml:ro
+      - ./kong/kong.yaml:/kong/kong.yaml:ro
+      - ./kong/plugins/jwt-blacklist:/usr/local/share/lua/5.1/kong/plugins/jwt-blacklist
     env_file:
       - .env
+    secrets:
+      - redis_password
 
   gotrue:
     image: bitnamilegacy/gotrue:2.178.0
@@ -65,6 +65,7 @@ services:
         condition: service_healthy
     networks:
       - ogna
+      - tokens
     env_file:
       - .env
 
@@ -110,10 +111,42 @@ services:
     env_file:
       - .env
 
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    expose:
+      - "6379"
+    volumes:
+      - redis_data:/data
+      - ./redis/redis.conf:/etc/redis/redis.conf  # Mount to default path
+      - ./logs:/var/log/redis
+    command: sh -c 'redis-server /etc/redis/redis.conf --requirepass "$$(cat /run/secrets/redis_password)"'
+    networks:
+      - tokens
+    restart: unless-stopped
+    healthcheck:
+      test: [ "CMD", "sh", "-c", "redis-cli ping | grep PONG" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    environment:
+      REDIS_REPLICATION_ROLE: master
+    secrets:
+      - redis_password
+
 volumes:
   postgres_data:
+    driver: local
+  redis_data:
     driver: local
 
 networks:
   ogna:
     driver: bridge
+  tokens:
+    driver: bridge
+
+secrets:
+  redis_password:
+    file: secrets/redis_password.txt

@@ -31,9 +31,11 @@ services:
           key_claim_name: aud # optional: use 'aud' as the key if needed
       - name: rate-limiting
         config:
-          second: 5 # max 5 requests per second
+          second: 30 # max 5 requests per second
           minute: 100 # max 100 requests per minute
           policy: local # uses Kong node memory, good for single instance
+
+
 
 plugins:
   - name: cors
@@ -53,4 +55,7 @@ plugins:
         - Authorization
         - Content-Type
       credentials: true
-
+  - name: jwt-blacklist
+    config:
+      redis_host: redis
+      redis_port: 6379
