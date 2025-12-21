@@ -125,7 +125,7 @@ cd <repo-folder>
 Start all services with Docker Compose:
 
 ```bash
-docker compose -f docker-compose.yaml -f docker-compose-api.yaml down -v
+docker compose -f docker-compose.yaml -f docker-compose-api.yaml up -d
 ```
 
 Check logs for Kong or FastAPI

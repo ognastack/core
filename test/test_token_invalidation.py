@@ -4,12 +4,13 @@ import json
 import uuid
 
 
-class TesApiHealth(unittest.TestCase):
+class TestLogoutTokenInvalidation(unittest.TestCase):
 
     def setUp(self):
         """Set up test fixtures before each test method"""
         self.base_url = "http://localhost:8000"
         self.signup_url = f"{self.base_url}/auth/signup"
+        self.logout_url = f"{self.base_url}/auth/logout"
         self.sign_in = f"{self.base_url}/auth/token?grant_type=password"
 
         self.health = f"{self.base_url}/api/v1/health/"
@@ -31,7 +32,6 @@ class TesApiHealth(unittest.TestCase):
             data=json.dumps(self.payload)
         )
 
-        print(response.json())
         # Assert successful response
         self.assertEqual(200, response.status_code)  # Or 200 depending on your API
 
@@ -62,14 +62,54 @@ class TesApiHealth(unittest.TestCase):
         """Test successful user signup"""
 
         result = self.session.get(url=self.health)
-        print(result.json())
         self.assertEqual(result.status_code, 200)
+
+        result = self.session.get(url=self.health)
+        self.assertEqual(result.status_code, 200)
+
+        result = self.session.get(url=self.health)
+        self.assertEqual(result.status_code, 200)
+
+        logout = self.session.post(url=self.logout_url)
+
+        self.assertEqual(logout.status_code, 204)
+
+        new_result = self.session.get(url=self.health)
+        self.assertEqual(new_result.status_code, 401)
+
+        new_result2 = self.session.get(url=self.health)
+        self.assertEqual(new_result2.status_code, 401)
+
+        response_sign_in = requests.post(self.sign_in, headers=self.headers, json=self.payload)
+
+        self.assertIn("access_token", response_sign_in.json())
+
+        access_token = response_sign_in.json()["access_token"]
+
+        # Create session
+        self.session = requests.session()
+
+        # Set headers including authorization
+        self.session.headers.update({
+            'Authorization': f'Bearer {access_token}',
+            'Content-Type': 'application/json'
+        })
+
+        new_result3 = self.session.get(url=self.health)
+        self.assertEqual(new_result3.status_code, 200)
+
+        logout = self.session.post(url=self.logout_url)
+
+        self.assertEqual(logout.status_code, 204)
+
+        new_result = self.session.get(url=self.health)
+        self.assertEqual(new_result.status_code, 401)
 
     def test_no_login_call(self):
         """Test successful user signup"""
 
         result = requests.get(url=self.health)
-        self.assertEqual(result.status_code, 200)
+        self.assertEqual(result.status_code, 401)
 
     def tearDown(self):
         """Clean up after each test"""
