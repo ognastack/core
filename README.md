@@ -49,6 +49,8 @@ OGNA is different by design:
 | API       | Your backend service (pluggable)              | 8000      |
 | Postgres  | Primary database                              | 5432      |
 | Redis     | JWT invalidation cache                        | 6379      |
+| RustFS    | S3-compatible object storage (MinIO alternative) | 9000 (Optional) |
+| Flyway    | Database migrations                           | N/A       |
 
 ---
 
@@ -113,7 +115,42 @@ Create a `.env` file containing:
 
 - Database credentials
 - GoTrue secrets
+- Database credentials
+- GoTrue secrets
 - JWT configuration
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `POSTGRES_USER` | Database user | `ogna_user` |
+| `POSTGRES_PASSWORD` | Database password | `supersecretpassword` |
+| `POSTGRES_DB` | Database name | `ogna_db` |
+| `GOTRUE_JWT_SECRET` | JWT Secret (must match Kong) | `superlongjwtsecret` |
+| `ENCRYPTION_KEY` | GOTRUE encryption key | `superlongjwtsecret` |
+| `API_EXTERNAL_URL` | External URL for API | `localhost:8000` |
+| `STORAGE_TYPE` | Storage backend type | `S3` |
+
+**External S3 Configuration (Optional)**
+
+If you prefer to use an external S3 provider (AWS, DigitalOcean, etc.) instead of the self-hosted RustFS, omit `docker-compose-storage.yaml` and set these additional variables:
+
+| Variable | Description |
+|----------|-------------|
+| `S3_ENDPOINT_URL` | S3 Endpoint (e.g., `https://sfo3.digitaloceanspaces.com`) |
+| `S3_ACCESS_KEY` | Access Key ID |
+| `S3_SECRET_KEY` | Secret Access Key |
+| `S3_BUCKET_NAME` | Bucket Name |
+| `S3_REGION` | AWS Region (if applicable) |
+
+### 3. Secrets
+
+Create a `secrets` directory and add the following files:
+
+- `secrets/redis_password.txt`: Put your secure Redis password in this file.
+
+```bash
+mkdir -p secrets
+echo "your_redis_password" > secrets/redis_password.txt
+```
 
 ### 3. Database migrations
 
@@ -126,6 +163,18 @@ They will be applied automatically using **Flyway** during startup.
 
 Start all services:
 
+### Standard (Self-hosted Storage)
+
+Use this if you don't have an external S3 bucket. It spins up **RustFS** as a local S3 provider.
+
+```bash
+docker compose -f docker-compose.yaml -f docker-compose-api.yaml -f docker-compose-storage.yaml up -d
+```
+
+### External S3
+
+Use this if you have configured S3 environment variables and don't need local storage.
+
 ```bash
 docker compose -f docker-compose.yaml -f docker-compose-api.yaml up -d
 ```
@@ -133,8 +182,7 @@ docker compose -f docker-compose.yaml -f docker-compose-api.yaml up -d
 View logs:
 
 ```bash
-docker compose logs -f kong-cp
-docker compose logs -f api
+docker compose logs -f
 ```
 
 Stop services:
@@ -155,9 +203,9 @@ docker compose down
 
 ---
 
-## Authentication API (GoTrue)
+### Authentication API
 
-### Signup
+#### Signup
 
 **POST /signup**
 
@@ -168,7 +216,7 @@ docker compose down
 }
 ```
 
-### Login / Token
+#### Login / Token
 
 **POST /token**
 
@@ -176,7 +224,7 @@ docker compose down
 grant_type=password&username=email@example.com&password=secret
 ```
 
-### Logout
+#### Logout
 
 **POST /logout**
 
