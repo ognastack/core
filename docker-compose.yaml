@@ -1,6 +1,6 @@
 x-kong-config: &kong-env
   KONG_DATABASE: postgres # Use Postgres as the backing database
-  KONG_PG_HOST: ogna-database # Hostname of the Postgres service
+  KONG_PG_HOST: postgres # Hostname of the Postgres service
   KONG_PG_DATABASE: ${POSTGRES_DB} # Name of the database to connect to
   KONG_PG_USER: ${POSTGRES_USER} # Database username
   KONG_PG_PASSWORD: ${POSTGRES_PASSWORD} # Database password
@@ -25,6 +25,7 @@ services:
       KONG_LOG_LEVEL: ${KONG_LOG_LEVEL:-notice}
       KONG_DATABASE: "off"
       KONG_DECLARATIVE_CONFIG: /kong/kong.yaml
+      GOTRUE_JWT_SECRET: ${GOTRUE_JWT_SECRET}
     expose:
       - "8001"
     healthcheck:
@@ -37,7 +38,7 @@ services:
       - "8000:8000"
       - "443:8443"
     volumes:
-      - ./kong/kong.yaml:/kong/kong.yaml:ro
+      - ./kong/kong.yaml:/kong/kong.yaml:ro,z
       - ./kong/plugins/jwt-blacklist:/usr/local/share/lua/5.1/kong/plugins/jwt-blacklist
     env_file:
       - .env
@@ -57,11 +58,11 @@ services:
       GOTRUE_JWT_AUD: "authenticated"
       GOTRUE_JWT_DEFAULT_GROUP_NAME: "authenticated"
       GOTRUE_SITE_URL: "http://localhost"
-      DATABASE_URL: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@ogna-database:5432/${POSTGRES_DB}?search_path=auth"
+      DATABASE_URL: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?search_path=auth"
     expose:
       - "9999"
     depends_on:
-      ogna-database:
+      postgres:
         condition: service_healthy
     networks:
       - ogna
@@ -69,8 +70,8 @@ services:
     env_file:
       - .env
 
-  ogna-database:
-    image: postgres:15
+  postgres:
+    image: postgres:18.1-alpine
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./migrations/init:/docker-entrypoint-initdb.d
@@ -96,10 +97,10 @@ services:
     image: flyway/flyway:10
     container_name: flyway_migrate
     depends_on:
-      ogna-database:
+      postgres:
         condition: service_healthy
     command: >
-      -url=jdbc:postgresql://ogna-database:5432/${POSTGRES_DB}
+      -url=jdbc:postgresql://postgres:5432/${POSTGRES_DB}
       -user=${POSTGRES_USER}
       -password=${POSTGRES_PASSWORD}
       -schemas=migrations migrate
@@ -135,16 +136,45 @@ services:
     secrets:
       - redis_password
 
+  storage:
+    image: ghcr.io/ognastack/storage:main
+    environment:
+      S3_SECRET_KEY: rustfsadmin
+      S3_ENDPOINT_URL: http://rustfs:9000
+      S3_ACCESS_KEY: rustfsadmin
+      DATABASE_URL: postgres
+      DATABASE_PORT: 5432
+      DATABASE_USERNAME: ${POSTGRES_USER}
+      DATABASE_PASSWORD: ${POSTGRES_PASSWORD}
+      DATABASE_NAME: ${POSTGRES_DB}
+      STORAGE_TYPE: 'S3'
+    volumes:
+      - temp_files:/tmp
+    expose:
+      - "8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - storage
+      - ogna
+    env_file:
+      - .env
+
 volumes:
   postgres_data:
     driver: local
   redis_data:
+    driver: local
+  temp_files:
     driver: local
 
 networks:
   ogna:
     driver: bridge
   tokens:
+    driver: bridge
+  storage:
     driver: bridge
 
 secrets:
