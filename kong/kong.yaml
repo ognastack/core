@@ -1,11 +1,11 @@
-_format_version: "3.0"
+_format_version: '3.0'
 _transform: true
 
 consumers:
   - username: ogna-user
     jwt_secrets:
-      - key: authenticated # This must match GoTrue JWT 'aud'
-        secret: superlongjwtsecret # The same JWT secret GoTrue uses
+      - key: authenticated
+        secret: superlongjwtsecret
         algorithm: HS256
 
 services:
@@ -16,7 +16,6 @@ services:
         paths:
           - /auth
 
-  # FastAPI backend
   - name: api-service
     url: http://api:8000
     routes:
@@ -28,13 +27,30 @@ services:
         config:
           claims_to_verify:
             - exp
-          key_claim_name: aud # optional: use 'aud' as the key if needed
+          key_claim_name: aud
       - name: rate-limiting
         config:
-          second: 30 # max 5 requests per second
-          minute: 100 # max 100 requests per minute
-          policy: local # uses Kong node memory, good for single instance
+          second: 30
+          minute: 100
+          policy: local
 
+  - name: storage-service
+    url: http://storage:8000
+    routes:
+      - name: storage-route
+        paths:
+          - /storage
+    plugins:
+      - name: jwt
+        config:
+          claims_to_verify:
+            - exp
+          key_claim_name: aud
+      - name: rate-limiting
+        config:
+          second: 30
+          minute: 100
+          policy: local
 
 
 plugins:

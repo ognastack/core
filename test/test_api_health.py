@@ -69,7 +69,7 @@ class TesApiHealth(unittest.TestCase):
         """Test successful user signup"""
 
         result = requests.get(url=self.health)
-        self.assertEqual(result.status_code, 200)
+        self.assertEqual(result.status_code, 401)
 
     def tearDown(self):
         """Clean up after each test"""

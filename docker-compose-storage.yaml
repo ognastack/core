@@ -1,0 +1,12 @@
+services:
+  rustfs:
+    image: rustfs/rustfs
+    container_name: rustfs
+    restart: unless-stopped # Add restart policy
+    environment:
+      RUSTFS_ACCESS_KEY: rustfsadmin
+      RUSTFS_SECRET_KEY: rustfsadmin
+    expose:
+      - "9000"
+    networks:
+      - storage

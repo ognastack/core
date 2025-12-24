@@ -4,7 +4,7 @@ services:
     container_name: api
     restart: unless-stopped # Add restart policy
     depends_on:
-      - ogna-database
+      - postgres
       - kong-cp
     expose:
       - "8000"
