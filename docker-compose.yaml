@@ -161,6 +161,18 @@ services:
     env_file:
       - .env
 
+  dashboard:
+    image: ghcr.io/ognastack/ogna-fe-template:main
+    ports:
+      - "3000:3000"
+    depends_on:
+      kong-cp:
+        condition: service_healthy
+    networks:
+      - ogna
+    env_file:
+      - .env
+
 volumes:
   postgres_data:
     driver: local
