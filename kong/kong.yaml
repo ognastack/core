@@ -16,6 +16,13 @@ services:
         paths:
           - /auth
 
+  - name: dashboard
+    url: http://dashboard:3000
+    routes:
+      - name: dashboard-route
+        paths:
+          - /
+
   - name: api-service
     url: http://api:8000
     routes:
