@@ -15,8 +15,7 @@ class TestStorage(unittest.TestCase):
         self.sign_in = f"{self.base_url}/auth/token?grant_type=password"
 
         self.storage_base = f"{self.base_url}/storage/v1"
-        self.storage_buckets = f"{self.storage_base}/buckets/"
-        self.storage_objs = f"{self.storage_base}/objects"
+        self.storage_buckets = f"{self.storage_base}/buckets"
 
         self.health = f"{self.base_url}/api/v1/health/"
 
@@ -88,16 +87,16 @@ class TestStorage(unittest.TestCase):
             'Authorization': f'Bearer {self.access_token}',
         }
 
-        response = requests.post(f"{self.storage_objs}/{bucket_name}", files=files, headers=headers)
+        response = requests.post(f"{self.storage_buckets}/{bucket_name}", files=files, headers=headers)
         self.assertEqual(response.status_code, 201, f"Upload failed: {response.text}")
 
-        response = requests.post(f"{self.storage_objs}/{bucket_name}", files=files, headers=headers)
+        response = requests.post(f"{self.storage_buckets}/{bucket_name}", files=files, headers=headers)
         self.assertEqual(response.status_code, 201, f"Upload failed: {response.text}")
 
-        response = requests.post(f"{self.storage_objs}/{bucket_name}", files=files, headers=headers)
+        response = requests.post(f"{self.storage_buckets}/{bucket_name}", files=files, headers=headers)
         self.assertEqual(response.status_code, 201, f"Upload failed: {response.text}")
 
-        response = requests.post(f"{self.storage_objs}/{bucket_name}", files=files, headers=headers)
+        response = requests.post(f"{self.storage_buckets}/{bucket_name}", files=files, headers=headers)
         self.assertEqual(response.status_code, 201, f"Upload failed: {response.text}")
 
     def test_upload_delete_file(self):
@@ -117,10 +116,10 @@ class TestStorage(unittest.TestCase):
             'Authorization': f'Bearer {self.access_token}',
         }
 
-        response = requests.post(f"{self.storage_objs}/{bucket_name}", files=files, headers=headers)
+        response = requests.post(f"{self.storage_buckets}/{bucket_name}", files=files, headers=headers)
         self.assertEqual(response.status_code, 201, f"Upload failed: {response.text}")
 
-        response = requests.delete(f"{self.storage_objs}/{bucket_name}/{file_name}", headers=headers)
+        response = requests.delete(f"{self.storage_buckets}/{bucket_name}/{file_name}", headers=headers)
         self.assertEqual(response.status_code, 201, f"Delete failed: {response.text}")
 
     def test_download_file(self):
@@ -140,11 +139,11 @@ class TestStorage(unittest.TestCase):
             'Authorization': f'Bearer {self.access_token}',
         }
 
-        response = requests.post(f"{self.storage_objs}/{bucket_name}", files=files, headers=headers)
+        response = requests.post(f"{self.storage_buckets}/{bucket_name}", files=files, headers=headers)
         self.assertEqual(response.status_code, 201, f"Upload failed: {response.text}")
 
         # 3. Download the file
-        response = requests.get(f"{self.storage_objs}/{bucket_name}/{file_name}", headers=headers)
+        response = requests.get(f"{self.storage_buckets}/{bucket_name}/{file_name}", headers=headers)
 
         # Assertions
         self.assertEqual(response.status_code, 200, f"Download failed: {response.text}")
@@ -172,15 +171,14 @@ class TestStorage(unittest.TestCase):
             'Authorization': f'Bearer {self.access_token}',
         }
 
-        response = requests.post(f"{self.storage_objs}/{bucket_name}", files=files, headers=headers)
+        response = requests.post(f"{self.storage_buckets}/{bucket_name}", files=files, headers=headers)
         self.assertEqual(response.status_code, 201, f"Upload failed: {response.text}")
 
         # 3. Download the file
-        response = requests.get(f"{self.storage_objs}/{str(uuid.uuid4())}/{file_name}", headers=headers)
+        response = requests.get(f"{self.storage_buckets}/{str(uuid.uuid4())}/{file_name}", headers=headers)
 
         # Assertions
         self.assertEqual(response.status_code, 404, f"Download failed: {response.text}")
-
 
     def test_list_files(self):
         bucket_name = f"test-bucket-{uuid.uuid4()}"
@@ -200,10 +198,11 @@ class TestStorage(unittest.TestCase):
             files = {
                 'file': (file_name, io.BytesIO(file_content), 'text/plain')
             }
-            response = requests.post(f"{self.storage_objs}/{bucket_name}", files=files, headers=headers)
+            response = requests.post(f"{self.storage_buckets}/{bucket_name}", files=files, headers=headers)
             self.assertEqual(response.status_code, 201, f"Upload failed: {response.text}")
 
-        response = requests.get(f"{self.storage_objs}/{bucket_name}", headers=headers)
+        print(f"{self.storage_buckets}/{bucket_name}")
+        response = requests.get(f"{self.storage_buckets}/{bucket_name}", headers=headers)
 
         list_files = response.json()
         print(list_files)
@@ -226,7 +225,7 @@ class TestStorage(unittest.TestCase):
         }
 
         # 3. Download the file
-        response = requests.get(f"{self.storage_objs}/{bucket_name}/{file_name}", headers=headers)
+        response = requests.get(f"{self.storage_buckets}/{bucket_name}/{file_name}", headers=headers)
 
         # Assertions
         self.assertEqual(response.status_code, 404, f"Download failed: {response.text}")
@@ -242,7 +241,7 @@ class TestStorage(unittest.TestCase):
             'Authorization': f'Bearer {self.access_token}',
         }
 
-        response = requests.delete(f"{self.storage_objs}/{bucket_name}/{file_name}", headers=headers)
+        response = requests.delete(f"{self.storage_buckets}/{bucket_name}/{file_name}", headers=headers)
         self.assertEqual(response.status_code, 404, f"Delete failed: {response.text}")
 
     def test_upload_non_existing_bucket(self):
@@ -260,7 +259,7 @@ class TestStorage(unittest.TestCase):
             'Authorization': f'Bearer {self.access_token}',
         }
 
-        response = requests.post(f"{self.storage_objs}/{bucket_name}", files=files, headers=headers)
+        response = requests.post(f"{self.storage_buckets}/{bucket_name}", files=files, headers=headers)
 
         # 4. Assertions
         self.assertEqual(response.status_code, 404, f"Upload failed: {response.text}")
