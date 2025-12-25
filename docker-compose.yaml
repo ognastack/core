@@ -1,77 +1,110 @@
 x-kong-config: &kong-env
-  KONG_DATABASE: postgres # Use Postgres as the backing database
-  KONG_PG_HOST: postgres # Hostname of the Postgres service
-  KONG_PG_DATABASE: ${POSTGRES_DB} # Name of the database to connect to
-  KONG_PG_USER: ${POSTGRES_USER} # Database username
-  KONG_PG_PASSWORD: ${POSTGRES_PASSWORD} # Database password
+  KONG_DATABASE: "off"
+  KONG_DECLARATIVE_CONFIG: /kong/kong.yaml
+  KONG_PLUGINS: bundled,cors,acme,jwt-blacklist
+  KONG_LUA_SSL_TRUSTED_CERTIFICATE: system
+  KONG_NGINX_HTTP_LUA_SHARED_DICT: acme_storage 10m
+  KONG_PROXY_ACCESS_LOG: /dev/stdout
+  KONG_ADMIN_ACCESS_LOG: /dev/stdout
+  KONG_PROXY_ERROR_LOG: /dev/stderr
+  KONG_ADMIN_ERROR_LOG: /dev/stderr
+  KONG_LOG_LEVEL: ${KONG_LOG_LEVEL:-notice}
 
 services:
 
+  ############################
+  # Kong API Gateway
+  ############################
   kong-cp:
     image: kong/kong-gateway:3.12.0.0
     container_name: kong-cp
     restart: unless-stopped
+    environment:
+      <<: *kong-env
+    ports:
+      - "8000:8000"
+      - "443:8443"
+    expose:
+      - "8001"
+    volumes:
+      - ./kong/kong.yaml:/kong/kong.yaml:ro,z
+      - ./kong/plugins/jwt-blacklist:/usr/local/share/lua/5.1/kong/plugins/jwt-blacklist
     networks:
       - ogna
       - tokens
-    environment:
-      KONG_PLUGINS: bundled,cors,acme,jwt-blacklist
-      KONG_LUA_SSL_TRUSTED_CERTIFICATE: system
-      KONG_NGINX_HTTP_LUA_SHARED_DICT: acme_storage 10m
-      KONG_PROXY_ACCESS_LOG: /dev/stdout
-      KONG_ADMIN_ACCESS_LOG: /dev/stdout
-      KONG_PROXY_ERROR_LOG: /dev/stderr
-      KONG_ADMIN_ERROR_LOG: /dev/stderr
-      KONG_LOG_LEVEL: ${KONG_LOG_LEVEL:-notice}
-      KONG_DATABASE: "off"
-      KONG_DECLARATIVE_CONFIG: /kong/kong.yaml
-      GOTRUE_JWT_SECRET: ${GOTRUE_JWT_SECRET}
-    expose:
-      - "8001"
     healthcheck:
       test: ["CMD", "kong", "health"]
       interval: 10s
       timeout: 10s
       retries: 10
-      start_period: 30s # Give Kong time to start
-    ports:
-      - "8000:8000"
-      - "443:8443"
-    volumes:
-      - ./kong/kong.yaml:/kong/kong.yaml:ro,z
-      - ./kong/plugins/jwt-blacklist:/usr/local/share/lua/5.1/kong/plugins/jwt-blacklist
-    env_file:
-      - .env
+      start_period: 30s
     secrets:
       - redis_password
 
-  gotrue:
-    image: bitnamilegacy/gotrue:2.178.0
-    platform: linux/amd64
-    environment:
-      GOTRUE_DISABLE_SIGNUP: false
-      GOTRUE_MAILER_AUTOCONFIRM: true
-      MAILER_AUTOCONFIRM: true
-      GOTRUE_API_HOST: "0.0.0.0"
-      GOTRUE_API_PORT: 9999
-      GOTRUE_DB_DRIVER: "postgres"
-      GOTRUE_JWT_AUD: "authenticated"
-      GOTRUE_JWT_DEFAULT_GROUP_NAME: "authenticated"
-      GOTRUE_SITE_URL: "http://localhost"
-      DATABASE_URL: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?search_path=auth"
-    expose:
-      - "9999"
+  ############################
+  # Authentik (Server)
+  ############################
+  authentik-server:
+    image: ghcr.io/goauthentik/server:2024.10
+    container_name: authentik-server
+    command: server
+    restart: unless-stopped
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY}
+      AUTHENTIK_POSTGRESQL__HOST: postgres
+      AUTHENTIK_POSTGRESQL__USER: ${POSTGRES_USER}
+      AUTHENTIK_POSTGRESQL__PASSWORD: ${POSTGRES_PASSWORD}
+      AUTHENTIK_POSTGRESQL__NAME: ${POSTGRES_DB}
+      AUTHENTIK_REDIS__HOST: redis
+      AUTHENTIK_REDIS__PASSWORD: ${REDIS_PASSWORD}
+      AUTHENTIK_LOG_LEVEL: info
+    ports:
+      - "9000:9000"
     networks:
       - ogna
       - tokens
     env_file:
       - .env
 
+  ############################
+  # Authentik (Worker)
+  ############################
+  authentik-worker:
+    image: ghcr.io/goauthentik/server:2024.10
+    container_name: authentik-worker
+    command: worker
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      AUTHENTIK_SECRET_KEY: ${AUTHENTIK_SECRET_KEY}
+      AUTHENTIK_POSTGRESQL__HOST: postgres
+      AUTHENTIK_POSTGRESQL__USER: ${POSTGRES_USER}
+      AUTHENTIK_POSTGRESQL__PASSWORD: ${POSTGRES_PASSWORD}
+      AUTHENTIK_POSTGRESQL__NAME: ${POSTGRES_DB}
+      AUTHENTIK_REDIS__HOST: redis
+      AUTHENTIK_REDIS__PASSWORD: ${REDIS_PASSWORD}
+    networks:
+      - ogna
+      - tokens
+    env_file:
+      - .env
+
+  ############################
+  # PostgreSQL
+  ############################
   postgres:
     image: postgres:18.1-alpine
+    container_name: postgres
+    restart: unless-stopped
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./migrations/init:/docker-entrypoint-initdb.d
@@ -79,20 +112,22 @@ services:
       - "5432"
     networks:
       - ogna
+    env_file:
+      - .env
     healthcheck:
       test:
         [
           "CMD-SHELL",
-          "pg_isready -U ${POSTGRES_USER:-ogna_user} -d ${POSTGRES_DB:-ogna_db}",
+          "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"
         ]
       interval: 5s
       timeout: 10s
       retries: 10
       start_period: 10s
-    restart: unless-stopped
-    env_file:
-      - .env
 
+  ############################
+  # Flyway
+  ############################
   flyway:
     image: flyway/flyway:10
     container_name: flyway_migrate
@@ -108,36 +143,41 @@ services:
       - ogna
     volumes:
       - ./migrations/post:/flyway/sql
-    restart: on-failure:20
     env_file:
       - .env
 
+  ############################
+  # Redis
+  ############################
   redis:
     image: redis:7-alpine
     container_name: redis
+    restart: unless-stopped
     expose:
       - "6379"
     volumes:
       - redis_data:/data
-      - ./redis/redis.conf:/etc/redis/redis.conf  # Mount to default path
-      - ./logs:/var/log/redis
-    command: sh -c 'redis-server /etc/redis/redis.conf --requirepass "$$(cat /run/secrets/redis_password)"'
+      - ./redis/redis.conf:/etc/redis/redis.conf
+    command: >
+      sh -c 'redis-server /etc/redis/redis.conf
+      --requirepass "$$(cat /run/secrets/redis_password)"'
     networks:
       - tokens
-    restart: unless-stopped
     healthcheck:
-      test: [ "CMD", "sh", "-c", "redis-cli ping | grep PONG" ]
+      test: ["CMD", "sh", "-c", "redis-cli -a $$REDIS_PASSWORD ping | grep PONG"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 10s
-    environment:
-      REDIS_REPLICATION_ROLE: master
     secrets:
       - redis_password
 
+  ############################
+  # Storage
+  ############################
   storage:
     image: ghcr.io/ognastack/storage:main
+    restart: unless-stopped
     environment:
       S3_SECRET_KEY: ${S3_SECRET_KEY}
       S3_ENDPOINT_URL: ${S3_ENDPOINT_URL}
@@ -147,7 +187,7 @@ services:
       DATABASE_USERNAME: ${POSTGRES_USER}
       DATABASE_PASSWORD: ${POSTGRES_PASSWORD}
       DATABASE_NAME: ${POSTGRES_DB}
-      STORAGE_TYPE: 'S3'
+      STORAGE_TYPE: S3
     volumes:
       - temp_files:/tmp
     expose:
@@ -156,19 +196,22 @@ services:
       postgres:
         condition: service_healthy
     networks:
-      - storage
       - ogna
+      - storage
     env_file:
       - .env
 
+############################
+# Volumes
+############################
 volumes:
   postgres_data:
-    driver: local
   redis_data:
-    driver: local
   temp_files:
-    driver: local
 
+############################
+# Networks
+############################
 networks:
   ogna:
     driver: bridge
@@ -177,6 +220,9 @@ networks:
   storage:
     driver: bridge
 
+############################
+# Secrets
+############################
 secrets:
   redis_password:
     file: secrets/redis_password.txt
