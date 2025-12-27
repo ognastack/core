@@ -1,0 +1,53 @@
+table:
+  schema: storage
+  name: bucket
+
+array_relationships:
+  - name: objects
+    using:
+      foreign_key_constraint_on:
+        table:
+          schema: storage
+          name: object
+        column: bucket_id
+
+select_permissions:
+  - role: authenticated
+    permission:
+      columns:
+        - id
+        - name
+        - owner
+      filter:
+        owner:
+          _eq: X-Hasura-User-Id
+
+insert_permissions:
+  - role: authenticated
+    permission:
+      columns:
+        - name
+      set:
+        owner: X-Hasura-User-Id
+      check:
+        owner:
+          _eq: X-Hasura-User-Id
+
+update_permissions:
+  - role: authenticated
+    permission:
+      columns:
+        - name
+      filter:
+        owner:
+          _eq: X-Hasura-User-Id
+      check:
+        owner:
+          _eq: X-Hasura-User-Id
+
+delete_permissions:
+  - role: authenticated
+    permission:
+      filter:
+        owner:
+          _eq: X-Hasura-User-Id

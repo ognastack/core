@@ -137,7 +137,8 @@ services:
       - redis_password
 
   storage:
-    image: ghcr.io/ognastack/storage:main
+    #image: ghcr.io/ognastack/storage:main
+    image: ogna-storage:prod
     environment:
       S3_SECRET_KEY: ${S3_SECRET_KEY}
       S3_ENDPOINT_URL: ${S3_ENDPOINT_URL}
@@ -148,6 +149,10 @@ services:
       DATABASE_PASSWORD: ${POSTGRES_PASSWORD}
       DATABASE_NAME: ${POSTGRES_DB}
       STORAGE_TYPE: 'S3'
+      GOTRUE_JWT_SECRET: ${GOTRUE_JWT_SECRET}
+      GRAPHQL_HOST: 'http://hasura:8080'
+      GRAPHQL_ENDPOINT: 'v1/graphql'
+      GRAPHQL_SECRET: ${HASURA_GRAPHQL_ADMIN_SECRET}
     volumes:
       - temp_files:/tmp
     expose:
@@ -172,6 +177,40 @@ services:
       - ogna
     env_file:
       - .env
+
+  hasura:
+    # 1. ADDED .cli-migrations-v3 suffix
+    image: hasura/graphql-engine:v2.40.0.cli-migrations-v3
+    container_name: hasura
+    ports:
+      - "8080:8080"
+    networks:
+      - ogna
+    volumes:
+      - ./hasura-config/metadata:/hasura-metadata
+    environment:
+      HASURA_GRAPHQL_DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      HASURA_GRAPHQL_ADMIN_SECRET: ${HASURA_GRAPHQL_ADMIN_SECRET}
+      HASURA_GRAPHQL_ENABLE_CONSOLE: "true"
+      HASURA_GRAPHQL_UNAUTHORIZED_ROLE: anonymous
+      HASURA_GRAPHQL_DEV_MODE: "true"
+      HASURA_GRAPHQL_METADATA_DIR: /hasura-metadata
+      HASURA_GRAPHQL_JWT_SECRET: >
+        {
+          "type": "HS256",
+          "key": "vPDsBi2TafJuP4iqp40qx60AR34Qf6hQgC8GWBB7GoOKGqL9V6",
+          "claims_map": {
+            "x-hasura-user-id": { "path": "$.sub" },
+            "x-hasura-default-role": { "path": "$.role" },
+            "x-hasura-allowed-roles": ["authenticated"]
+          }
+        }
+    env_file:
+      - .env
+    depends_on:
+      postgres:
+        condition: service_healthy
+
 
 volumes:
   postgres_data:

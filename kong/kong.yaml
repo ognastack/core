@@ -1,14 +1,25 @@
-_format_version: '3.0'
+_format_version: "3.0"
 _transform: true
 
+############################
+# CONSUMERS
+############################
+
 consumers:
-  - username: ogna-user
+  - username: ogna-platform
     jwt_secrets:
       - key: authenticated
-        secret: superlongjwtsecret
+        secret: vPDsBi2TafJuP4iqp40qx60AR34Qf6hQgC8GWBB7GoOKGqL9V6
         algorithm: HS256
 
+############################
+# SERVICES
+############################
+
 services:
+  ##################################
+  # GoTrue (AUTH)
+  ##################################
   - name: gotrue-service
     url: http://gotrue:9999
     routes:
@@ -16,6 +27,9 @@ services:
         paths:
           - /auth
 
+  ##################################
+  # Dashboard (PUBLIC)
+  ##################################
   - name: dashboard
     url: http://dashboard:3000
     routes:
@@ -23,6 +37,9 @@ services:
         paths:
           - /
 
+  ##################################
+  # API SERVICE
+  ##################################
   - name: api-service
     url: http://api:8000
     routes:
@@ -32,15 +49,18 @@ services:
     plugins:
       - name: jwt
         config:
+          key_claim_name: aud
           claims_to_verify:
             - exp
-          key_claim_name: aud
       - name: rate-limiting
         config:
           second: 30
           minute: 100
           policy: local
 
+  ##################################
+  # STORAGE SERVICE
+  ##################################
   - name: storage-service
     url: http://storage:8000
     routes:
@@ -50,26 +70,42 @@ services:
     plugins:
       - name: jwt
         config:
+          key_claim_name: aud
           claims_to_verify:
             - exp
-          key_claim_name: aud
       - name: rate-limiting
         config:
           second: 30
           minute: 100
           policy: local
 
+  ##################################
+  # HASURA (INTERNAL GRAPHQL)
+  ##################################
+  - name: hasura
+    url: http://hasura:8080/v1/graphql
+    routes:
+      - name: graphql
+        paths:
+          - /graphql
+
+############################
+# GLOBAL PLUGINS
+############################
 
 plugins:
+  ##################################
+  # CORS
+  ##################################
   - name: cors
     config:
       origins:
         - http://localhost:3000
         - http://127.0.0.1:3000
-        - http://127.0.0.1:8000
-        - http://localhost:8000
         - http://localhost:5173
         - http://127.0.0.1:5173
+        - http://localhost:8000
+        - http://127.0.0.1:8000
       methods:
         - GET
         - POST
@@ -80,6 +116,10 @@ plugins:
         - Authorization
         - Content-Type
       credentials: true
+
+  ##################################
+  # JWT BLACKLIST (OPTIONAL)
+  ##################################
   - name: jwt-blacklist
     config:
       redis_host: redis
