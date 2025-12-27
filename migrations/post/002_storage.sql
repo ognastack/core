@@ -1,5 +1,5 @@
 
--- Create the checks schema
+-- migrate:up
 CREATE SCHEMA IF NOT EXISTS storage;
 
 CREATE TABLE storage.bucket (
@@ -31,3 +31,4 @@ CREATE TABLE storage.object (
 CREATE INDEX ix_storage_object_name ON storage.object (name);
 
 ALTER TABLE storage.object ADD CONSTRAINT object_bucket_id_name_key UNIQUE (bucket_id, name);
+-- migrate:down

@@ -26,17 +26,17 @@ services:
       KONG_DATABASE: "off"
       KONG_DECLARATIVE_CONFIG: /kong/kong.yaml
       GOTRUE_JWT_SECRET: ${GOTRUE_JWT_SECRET}
-    expose:
-      - "8001"
+      KONG_PROXY_LISTEN: 0.0.0.0:8000, 0.0.0.0:8443 ssl
+    ports:
+        - "80:8000"
+        - "443:8443"
+        - "8000:8000"
     healthcheck:
       test: ["CMD", "kong", "health"]
       interval: 10s
       timeout: 10s
       retries: 10
       start_period: 30s # Give Kong time to start
-    ports:
-      - "8000:8000"
-      - "443:8443"
     volumes:
       - ./kong/kong.yaml:/kong/kong.yaml:ro,z
       - ./kong/plugins/jwt-blacklist:/usr/local/share/lua/5.1/kong/plugins/jwt-blacklist
@@ -69,6 +69,11 @@ services:
       - tokens
     env_file:
       - .env
+    healthcheck:
+      test: ["CMD-SHELL", "ps | grep '[g]otrue'"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
 
   postgres:
     image: postgres:18.1-alpine
@@ -93,24 +98,25 @@ services:
     env_file:
       - .env
 
-  flyway:
-    image: flyway/flyway:10
-    container_name: flyway_migrate
+  migrations:
+    image: ghcr.io/amacneil/dbmate:main
+    container_name: migrations
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+      DBMATE_MIGRATIONS_TABLE: migrations.schema_migrations
+      DBMATE_MIGRATIONS_DIR: "/db/migrations"
+      DBMATE_NO_DUMP_SCHEMA: false
+    volumes:
+      - ./migrations/post:/db/migrations
     depends_on:
       postgres:
         condition: service_healthy
-    command: >
-      -url=jdbc:postgresql://postgres:5432/${POSTGRES_DB}
-      -user=${POSTGRES_USER}
-      -password=${POSTGRES_PASSWORD}
-      -schemas=migrations migrate
+      gotrue:
+        condition: service_healthy
+    command: up
+    restart: on-failure
     networks:
       - ogna
-    volumes:
-      - ./migrations/post:/flyway/sql
-    restart: on-failure:20
-    env_file:
-      - .env
 
   redis:
     image: redis:7-alpine
@@ -181,8 +187,8 @@ services:
     # 1. ADDED .cli-migrations-v3 suffix
     image: hasura/graphql-engine:v2.40.0.cli-migrations-v3
     container_name: hasura
-    ports:
-      - "8080:8080"
+    expose:
+      - "8080"
     networks:
       - ogna
     volumes:

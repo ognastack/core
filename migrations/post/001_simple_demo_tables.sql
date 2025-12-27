@@ -1,5 +1,5 @@
+-- migrate:up
 
--- Create the checks schema
 CREATE SCHEMA IF NOT EXISTS checks;
 
 -- Create a simple checks table
@@ -80,3 +80,4 @@ INSERT INTO checks.health_checks (service_name, status, response_time_ms) VALUES
     ('api-gateway', 'healthy', 45),
     ('user-service', 'healthy', 23),
     ('payment-service', 'unhealthy', 5000);
+-- migrate:down
