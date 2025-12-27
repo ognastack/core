@@ -137,8 +137,7 @@ services:
       - redis_password
 
   storage:
-    #image: ghcr.io/ognastack/storage:main
-    image: ogna-storage:prod
+    image: ghcr.io/ognastack/storage:main
     environment:
       S3_SECRET_KEY: ${S3_SECRET_KEY}
       S3_ENDPOINT_URL: ${S3_ENDPOINT_URL}
