@@ -9,6 +9,7 @@ services:
     expose:
       - "8000"
     networks:
-      - ogna
+      - gql
+      - api
     env_file:
       - .env

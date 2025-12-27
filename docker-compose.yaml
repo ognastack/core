@@ -12,7 +12,7 @@ services:
     container_name: kong-cp
     restart: unless-stopped
     networks:
-      - ogna
+      - api
       - tokens
     environment:
       KONG_PLUGINS: bundled,cors,acme,jwt-blacklist
@@ -65,8 +65,9 @@ services:
       postgres:
         condition: service_healthy
     networks:
-      - ogna
+      - api
       - tokens
+      - database
     env_file:
       - .env
     healthcheck:
@@ -83,7 +84,7 @@ services:
     expose:
       - "5432"
     networks:
-      - ogna
+      - database
     healthcheck:
       test:
         [
@@ -116,7 +117,7 @@ services:
     command: up
     restart: on-failure
     networks:
-      - ogna
+      - database
 
   redis:
     image: redis:7-alpine
@@ -167,7 +168,8 @@ services:
         condition: service_healthy
     networks:
       - storage
-      - ogna
+      - gql
+      - api
     env_file:
       - .env
 
@@ -179,7 +181,7 @@ services:
       kong-cp:
         condition: service_healthy
     networks:
-      - ogna
+      - api
     env_file:
       - .env
 
@@ -190,7 +192,8 @@ services:
     expose:
       - "8080"
     networks:
-      - ogna
+      - gql
+      - database
     volumes:
       - ./hasura-config/metadata:/hasura-metadata
     environment:
@@ -228,11 +231,15 @@ volumes:
     driver: local
 
 networks:
-  ogna:
-    driver: bridge
   tokens:
     driver: bridge
   storage:
+    driver: bridge
+  database:
+    driver: bridge
+  gql:
+    driver: bridge
+  api:
     driver: bridge
 
 secrets:
