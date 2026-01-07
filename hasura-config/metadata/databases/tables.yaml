@@ -1,2 +1,2 @@
-- "!include storage_bucket.yaml"
-- "!include storage_object.yaml"
+- "!include core/storage_bucket.yaml"
+- "!include core/storage_object.yaml"
