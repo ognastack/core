@@ -264,6 +264,30 @@ class TestStorage(unittest.TestCase):
         # 4. Assertions
         self.assertEqual(response.status_code, 404, f"Upload failed: {response.text}")
 
+    def test_file_id_upon_creation(self):
+        bucket_name = f"test-bucket-{uuid.uuid4()}"
+        bucket_data = {"name": bucket_name, "public": False}
+        print(self.session.post(self.storage_buckets, json=bucket_data).json())
+
+        # 2. Prepare the file
+        file_content = b"Hello World, this is a test file."
+        file_name = "test_document.txt"
+
+        files = {
+            'file': (file_name, io.BytesIO(file_content), 'text/plain')
+        }
+
+        headers = {
+            'Authorization': f'Bearer {self.access_token}',
+        }
+
+        response_create_file = requests.post(f"{self.storage_buckets}/{bucket_name}", files=files, headers=headers)
+        self.assertEqual(response_create_file.status_code, 201, f"Upload failed: {response_create_file.text}")
+
+        file_data = response_create_file.json()
+
+        self.assertIn("file_id", file_data)
+
     def tearDown(self):
         """Clean up after each test"""
         # Add any cleanup code here if needed
