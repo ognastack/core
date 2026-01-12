@@ -54,8 +54,8 @@ services:
             - exp
       - name: rate-limiting
         config:
-          second: 30
-          minute: 100
+          second: 500
+          minute: 1000
           policy: local
 
   ##################################
