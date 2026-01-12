@@ -1,0 +1,2 @@
+- "!include core/tables/storage_bucket.yaml"
+- "!include core/tables/storage_object.yaml"
