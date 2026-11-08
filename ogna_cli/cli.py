@@ -124,6 +124,7 @@ def cmd_init(args: argparse.Namespace) -> int:
         api_image=api_image,
         s3_secret=_generate_secret(32),
         hasura_secret=_generate_secret(40),
+        gateway_db_password=_generate_secret(40),
     )
     env_example_content = ENV_TEMPLATE.format(
         postgres_password="change_me_postgres_password",
@@ -133,6 +134,7 @@ def cmd_init(args: argparse.Namespace) -> int:
         api_image=api_image,
         s3_secret="rustfsadmin",
         hasura_secret="change_me_hasura_admin_secret",
+        gateway_db_password="change_me_gateway_db_password",
     )
 
     created_files: list[str] = [".ogna/docker-compose.core.yaml", ".ogna/docker-compose.storage.yaml"]

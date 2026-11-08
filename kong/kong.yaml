@@ -160,3 +160,10 @@ plugins:
   - name: ogna-guard
     config:
       jwt_secret: ${GOTRUE_JWT_SECRET}
+      db_host: postgres
+      db_port: 5432
+      db_name: ${POSTGRES_DB}
+      db_user: ogna_gateway
+      db_password: ${OGNA_GATEWAY_DB_PASSWORD}
+      session_cache_ttl: 5
+      revoked_cache_ttl: 300

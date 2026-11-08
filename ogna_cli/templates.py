@@ -9,6 +9,7 @@ CORE_COMPOSE_YAML = """services:
       - no-new-privileges:true
     networks:
       - api
+      - database
     environment:
       KONG_PLUGINS: bundled,cors,acme,ogna-guard
       KONG_HEADERS: "off"
@@ -22,6 +23,8 @@ CORE_COMPOSE_YAML = """services:
       KONG_DATABASE: "off"
       KONG_DECLARATIVE_CONFIG: /kong/kong.yaml
       GOTRUE_JWT_SECRET: ${GOTRUE_JWT_SECRET}
+      POSTGRES_DB: ${POSTGRES_DB}
+      OGNA_GATEWAY_DB_PASSWORD: ${OGNA_GATEWAY_DB_PASSWORD}
       OGNA_EXTRA_ROUTES: ${OGNA_EXTRA_ROUTES:-}
       KONG_PROXY_LISTEN: 0.0.0.0:8000, 0.0.0.0:8443 ssl
     ports:
@@ -59,7 +62,7 @@ CORE_COMPOSE_YAML = """services:
       GOTRUE_API_PORT: 9999
       GOTRUE_DB_DRIVER: "postgres"
       GOTRUE_JWT_AUD: "authenticated"
-      GOTRUE_JWT_EXP: ${GOTRUE_JWT_EXP:-600}
+      GOTRUE_JWT_EXP: ${GOTRUE_JWT_EXP:-3600}
       GOTRUE_JWT_DEFAULT_GROUP_NAME: "authenticated"
       GOTRUE_JWT_SECRET: ${GOTRUE_JWT_SECRET}
       GOTRUE_SITE_URL: ${GOTRUE_SITE_URL:-http://localhost}
@@ -110,6 +113,7 @@ CORE_COMPOSE_YAML = """services:
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
       DBMATE_MIGRATIONS_TABLE: migrations.schema_migrations
+      OGNA_GATEWAY_DB_PASSWORD: ${OGNA_GATEWAY_DB_PASSWORD}
       DBMATE_MIGRATIONS_DIR: "/db/migrations"
       DBMATE_NO_DUMP_SCHEMA: "true"
     depends_on:
@@ -301,7 +305,8 @@ STORAGE_TYPE="S3"
 S3_SECRET_KEY={s3_secret}
 S3_ENDPOINT_URL=http://rustfs:9000
 S3_ACCESS_KEY=rustfsadmin
-GOTRUE_JWT_EXP=600
+GOTRUE_JWT_EXP=3600
+OGNA_GATEWAY_DB_PASSWORD={gateway_db_password}
 HASURA_GRAPHQL_ADMIN_SECRET={hasura_secret}
 """
 

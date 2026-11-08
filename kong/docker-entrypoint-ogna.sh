@@ -67,6 +67,8 @@ EOF
     { print }
   ' "$TEMPLATE_PATH" | sed \
     -e "s|\${GOTRUE_JWT_SECRET}|${JWT_SECRET}|g" \
+    -e "s|\${POSTGRES_DB}|${POSTGRES_DB:-ogna_db}|g" \
+    -e "s|\${OGNA_GATEWAY_DB_PASSWORD}|${OGNA_GATEWAY_DB_PASSWORD:-}|g" \
     > "$RENDERED_PATH"
 
   export KONG_DECLARATIVE_CONFIG="$RENDERED_PATH"

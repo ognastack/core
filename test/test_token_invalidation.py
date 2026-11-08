@@ -1,10 +1,14 @@
 import base64
 import json
 import os
+import time
 import unittest
 import uuid
 
 import requests
+
+# Max seconds an "active session" result is cached by the gateway (ogna-guard session_cache_ttl)
+SESSION_CACHE_TTL = int(os.environ.get("OGNA_SESSION_CACHE_TTL", "5"))
 
 
 def _jwt_claims(token):
@@ -14,7 +18,7 @@ def _jwt_claims(token):
 
 
 class TestLogoutTokenInvalidation(unittest.TestCase):
-    """Logout revokes refresh tokens; access tokens are short-lived (GOTRUE_JWT_EXP)."""
+    """Logout ends the GoTrue session; the gateway rejects every token from that session."""
 
     def setUp(self):
         self.base_url = "http://localhost:8000"
@@ -36,8 +40,6 @@ class TestLogoutTokenInvalidation(unittest.TestCase):
         response = requests.post(self.sign_in_url, headers=self.headers, json=self.payload)
         self.assertEqual(200, response.status_code)
         body = response.json()
-        self.assertIn("access_token", body)
-        self.assertIn("refresh_token", body)
         return body["access_token"], body["refresh_token"]
 
     def _authed(self, access_token):
@@ -48,36 +50,49 @@ class TestLogoutTokenInvalidation(unittest.TestCase):
         })
         return session
 
-    def test_access_token_is_short_lived(self):
+    def _wait_for_cache(self):
+        time.sleep(SESSION_CACHE_TTL + 1)
+
+    def test_tokens_carry_session_id(self):
         access_token, _ = self._sign_in()
-        claims = _jwt_claims(access_token)
-        max_exp = int(os.environ.get("GOTRUE_JWT_EXP", "600"))
-        self.assertLessEqual(claims["exp"] - claims["iat"], max_exp)
+        self.assertIn("session_id", _jwt_claims(access_token))
 
-    def test_logout_revokes_refresh_token(self):
-        access_token, refresh_token = self._sign_in()
+    def test_logout_rejects_access_token(self):
+        access_token, _ = self._sign_in()
         session = self._authed(access_token)
-
         self.assertEqual(session.get(self.health).status_code, 200)
 
-        # Refresh works while logged in (and rotates the refresh token)
+        self.assertEqual(session.post(self.logout_url).status_code, 204)
+        self._wait_for_cache()
+
+        self.assertEqual(session.get(self.health).status_code, 401)
+
+    def test_logout_rejects_every_token_of_the_session(self):
+        """A token stolen before a refresh is also rejected once the session ends."""
+        old_access, refresh_token = self._sign_in()
+
         refreshed = requests.post(self.refresh_url, headers=self.headers,
                                   json={"refresh_token": refresh_token})
         self.assertEqual(refreshed.status_code, 200)
-        access_token = refreshed.json()["access_token"]
-        refresh_token = refreshed.json()["refresh_token"]
-        session = self._authed(access_token)
+        new_access = refreshed.json()["access_token"]
+        new_refresh = refreshed.json()["refresh_token"]
+        self.assertEqual(_jwt_claims(old_access)["session_id"], _jwt_claims(new_access)["session_id"])
 
-        logout = session.post(self.logout_url)
-        self.assertEqual(logout.status_code, 204)
+        self.assertEqual(self._authed(old_access).get(self.health).status_code, 200)
+        self.assertEqual(self._authed(new_access).post(self.logout_url).status_code, 204)
+        self._wait_for_cache()
 
-        # After logout the refresh token can no longer mint new access tokens
+        self.assertEqual(self._authed(old_access).get(self.health).status_code, 401)
+        self.assertEqual(self._authed(new_access).get(self.health).status_code, 401)
+
         after = requests.post(self.refresh_url, headers=self.headers,
-                              json={"refresh_token": refresh_token})
+                              json={"refresh_token": new_refresh})
         self.assertIn(after.status_code, (400, 401))
-        self.assertNotIn("access_token", after.json())
 
-        # Signing in again starts a fresh, working session
+    def test_new_sign_in_after_logout_works(self):
+        access_token, _ = self._sign_in()
+        self.assertEqual(self._authed(access_token).post(self.logout_url).status_code, 204)
+
         new_access, _ = self._sign_in()
         self.assertEqual(self._authed(new_access).get(self.health).status_code, 200)
 

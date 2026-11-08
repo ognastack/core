@@ -1,27 +1,78 @@
 local jwt_parser = require "kong.plugins.jwt.jwt_parser"
+local pgmoon = require "pgmoon"
 
 -- OGNA security guard.
--- Token revocation is handled by short-lived GoTrue access tokens (GOTRUE_JWT_EXP)
--- plus refresh-token revocation on logout, so no external store is needed here.
--- This plugin only:
 --   * strips internal headers that clients must never be able to spoof,
+--   * verifies bearer tokens and rejects tokens whose GoTrue session has ended
+--     (logout, "log out everywhere", deleted user, session timeout),
 --   * forwards verified user claims to upstreams as X-Authenticated-User-* headers,
 --   * adds baseline security response headers.
+--
+-- Revocation source of truth is GoTrue's own `auth.sessions` table: GoTrue deletes
+-- the row on logout, so every access token carrying that `session_id` stops working.
+-- Results are cached in Kong's shared cache so Postgres sees at most one lookup per
+-- session every `session_cache_ttl` seconds.
 local OgnaGuardHandler = {
-  VERSION = "2.0.0",
+  VERSION = "3.0.0",
   PRIORITY = 900,
 }
 
--- Retrieve the JWT secret from config or environment
+local UUID_PATTERN = "^%x%x%x%x%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%x%x%x%x%x%x%x%x$"
+
+local function is_placeholder(value)
+  return value == nil or value == "" or value:find("^%${") ~= nil
+end
+
 local function get_jwt_secret(conf)
-    if conf and conf.jwt_secret and conf.jwt_secret ~= "" and not conf.jwt_secret:find("^%${") then
-        return conf.jwt_secret
-    end
-    local env_secret = os.getenv("GOTRUE_JWT_SECRET")
-    if env_secret and env_secret ~= "" then
-        return env_secret
-    end
-    return nil
+  if conf and not is_placeholder(conf.jwt_secret) then
+    return conf.jwt_secret
+  end
+  local env_secret = os.getenv("GOTRUE_JWT_SECRET")
+  if env_secret and env_secret ~= "" then
+    return env_secret
+  end
+  return nil
+end
+
+-- Returns true if the session is active, nil if it no longer exists, or nil + err on failure.
+-- Returning nil (without err) lets kong.cache store it as a negative entry.
+local function load_session(conf, session_id)
+  local pg = pgmoon.new({
+    host = conf.db_host,
+    port = conf.db_port,
+    database = conf.db_name,
+    user = conf.db_user,
+    password = conf.db_password,
+  })
+  pg:settimeout(conf.db_timeout)
+
+  local ok, err = pg:connect()
+  if not ok then
+    return nil, "session store connect failed: " .. tostring(err)
+  end
+
+  local res, qerr = pg:query(
+    "SELECT 1 FROM auth.sessions WHERE id = " .. pg:escape_literal(session_id) ..
+    " AND (not_after IS NULL OR not_after > now()) LIMIT 1"
+  )
+  pg:keepalive(60000, 50)
+
+  if not res then
+    return nil, "session lookup failed: " .. tostring(qerr)
+  end
+  if type(res) == "table" and #res > 0 then
+    return true
+  end
+  return nil
+end
+
+local function session_is_active(conf, session_id)
+  local cache_key = "ogna-guard:session:" .. session_id
+  local active, err = kong.cache:get(cache_key, {
+    ttl = conf.session_cache_ttl,
+    neg_ttl = conf.revoked_cache_ttl,
+  }, load_session, conf, session_id)
+  return active, err
 end
 
 function OgnaGuardHandler:access(conf)
@@ -30,10 +81,8 @@ function OgnaGuardHandler:access(conf)
   kong.service.request.clear_header("X-Authenticated-User-Id")
   kong.service.request.clear_header("X-Authenticated-User-Role")
 
-  local path = kong.request.get_path()
-
-  -- Login and signup never carry a meaningful bearer token
-  if path:match("^/auth/token") or path:match("^/auth/signup") then
+  -- GoTrue validates its own sessions on /auth/*
+  if kong.request.get_path():match("^/auth/") then
     return
   end
 
@@ -48,11 +97,10 @@ function OgnaGuardHandler:access(conf)
     return kong.response.exit(401, { message = "Invalid JWT format" })
   end
 
-  -- Only forward claims from a token we have verified ourselves
   local secret = get_jwt_secret(conf)
   if not secret then
-    kong.log.err("GOTRUE_JWT_SECRET not configured; not forwarding user claims")
-    return
+    kong.log.err("GOTRUE_JWT_SECRET not configured")
+    return kong.response.exit(503, { message = "Authentication verification unavailable" })
   end
   if not jwt:verify_signature(secret) then
     return kong.response.exit(401, { message = "Invalid token signature" })
@@ -61,8 +109,27 @@ function OgnaGuardHandler:access(conf)
   local claims = jwt.claims or {}
   local exp = tonumber(claims.exp)
   if exp and exp <= ngx.time() then
-    -- Expired: protected routes are rejected by the jwt plugin; never forward stale identity
+    -- Protected routes are rejected by the jwt plugin; never forward stale identity
     return
+  end
+
+  -- Session check: tokens issued by GoTrue for a user always carry session_id.
+  -- Tokens without one (e.g. service keys minted with the JWT secret) skip this check.
+  local session_id = claims.session_id
+  if session_id ~= nil then
+    session_id = tostring(session_id)
+    if not session_id:match(UUID_PATTERN) then
+      return kong.response.exit(401, { message = "Invalid session" })
+    end
+
+    local active, serr = session_is_active(conf, session_id)
+    if serr then
+      kong.log.err("ogna-guard: ", serr)
+      return kong.response.exit(503, { message = "Authentication verification unavailable" })
+    end
+    if not active then
+      return kong.response.exit(401, { message = "Session has ended (logged out)" })
+    end
   end
 
   if claims.sub then
