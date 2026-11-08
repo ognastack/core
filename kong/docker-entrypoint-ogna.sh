@@ -6,10 +6,6 @@ RENDERED_PATH="/tmp/kong.yaml"
 
 if [ -f "$TEMPLATE_PATH" ]; then
   JWT_SECRET="${GOTRUE_JWT_SECRET:-vPDsBi2TafJuP4iqp40qx60AR34Qf6hQgC8GWBB7GoOKGqL9V6}"
-  REDIS_PASS="${REDIS_PASSWORD:-}"
-  if [ -z "$REDIS_PASS" ] && [ -f "/run/secrets/redis_password" ]; then
-    REDIS_PASS="$(tr -d '[:space:]' < /run/secrets/redis_password)"
-  fi
 
   EXTRA_SERVICES_FILE="/tmp/kong_extra_services.yaml"
   : > "$EXTRA_SERVICES_FILE"
@@ -71,7 +67,8 @@ EOF
     { print }
   ' "$TEMPLATE_PATH" | sed \
     -e "s|\${GOTRUE_JWT_SECRET}|${JWT_SECRET}|g" \
-    -e "s|\${REDIS_PASSWORD}|${REDIS_PASS}|g" \
+    -e "s|\${POSTGRES_DB}|${POSTGRES_DB:-ogna_db}|g" \
+    -e "s|\${OGNA_GATEWAY_DB_PASSWORD}|${OGNA_GATEWAY_DB_PASSWORD:-}|g" \
     > "$RENDERED_PATH"
 
   export KONG_DECLARATIVE_CONFIG="$RENDERED_PATH"
