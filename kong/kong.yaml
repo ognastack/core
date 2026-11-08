@@ -1,36 +1,30 @@
 _format_version: "3.0"
 _transform: true
 
-############################
-# CONSUMERS
-############################
-
-consumers:
-  - username: ogna-platform
-    jwt_secrets:
-      - key: authenticated
-        secret: ${GOTRUE_JWT_SECRET}
-        algorithm: HS256
-
-############################
-# SERVICES
-############################
+# Rendered at container start by docker-entrypoint-ogna.sh: placeholders are
+# replaced and OGNA_EXTRA_ROUTES services are injected at the end-of-services marker.
 
 services:
   ##################################
-  # GoTrue (AUTH)
+  # ZITADEL (identity provider) on its own hostname, OGNA_AUTH_DOMAIN.
+  # Host-matched routes win over the host-less OGNA routes below, so
+  # everything on the auth domain goes to Zitadel and nothing else does.
   ##################################
-  - name: gotrue-service
-    url: http://gotrue:9999
+  - name: zitadel-api
+    url: http://zitadel:8080
     routes:
-      - name: gotrue-route
+      - name: zitadel-api-route
+        hosts:
+          - ${OGNA_AUTH_DOMAIN}
         paths:
-          - /auth
+          - /
+        strip_path: false
+        preserve_host: true
     plugins:
       - name: rate-limiting
         config:
-          second: 20
-          minute: 120
+          second: 50
+          minute: 600
           policy: local
           hide_client_headers: true
       - name: request-size-limiting
@@ -38,17 +32,17 @@ services:
           allowed_payload_size: 1
           size_unit: megabytes
 
-  ##################################
-  # GoTrue credential endpoints: strict per-IP limits against brute force and
-  # signup / email spam (OGNA_AUTH_RATE_LIMIT_MINUTE / _HOUR). Longer paths win
-  # over /auth in Kong's router, so these take precedence.
-  ##################################
-  - name: gotrue-token-service
-    url: http://gotrue:9999/token
+  # Token endpoint: strict per-IP limit (credential guessing, refresh abuse)
+  - name: zitadel-token
+    url: http://zitadel:8080
     routes:
-      - name: gotrue-token-route
+      - name: zitadel-token-route
+        hosts:
+          - ${OGNA_AUTH_DOMAIN}
         paths:
-          - /auth/token
+          - /oauth/v2/token
+        strip_path: false
+        preserve_host: true
     plugins:
       - name: rate-limiting
         config:
@@ -61,71 +55,22 @@ services:
           allowed_payload_size: 1
           size_unit: megabytes
 
-  - name: gotrue-signup-service
-    url: http://gotrue:9999/signup
+  # Login UI (Next.js)
+  - name: zitadel-login
+    url: http://zitadel-login:3000
     routes:
-      - name: gotrue-signup-route
+      - name: zitadel-login-route
+        hosts:
+          - ${OGNA_AUTH_DOMAIN}
         paths:
-          - /auth/signup
+          - /ui/v2/login
+        strip_path: false
+        preserve_host: true
     plugins:
       - name: rate-limiting
         config:
-          minute: ${OGNA_AUTH_RATE_LIMIT_MINUTE}
-          hour: ${OGNA_AUTH_RATE_LIMIT_HOUR}
-          policy: local
-          hide_client_headers: true
-      - name: request-size-limiting
-        config:
-          allowed_payload_size: 1
-          size_unit: megabytes
-
-  - name: gotrue-recover-service
-    url: http://gotrue:9999/recover
-    routes:
-      - name: gotrue-recover-route
-        paths:
-          - /auth/recover
-    plugins:
-      - name: rate-limiting
-        config:
-          minute: ${OGNA_AUTH_RATE_LIMIT_MINUTE}
-          hour: ${OGNA_AUTH_RATE_LIMIT_HOUR}
-          policy: local
-          hide_client_headers: true
-      - name: request-size-limiting
-        config:
-          allowed_payload_size: 1
-          size_unit: megabytes
-
-  - name: gotrue-otp-service
-    url: http://gotrue:9999/otp
-    routes:
-      - name: gotrue-otp-route
-        paths:
-          - /auth/otp
-    plugins:
-      - name: rate-limiting
-        config:
-          minute: ${OGNA_AUTH_RATE_LIMIT_MINUTE}
-          hour: ${OGNA_AUTH_RATE_LIMIT_HOUR}
-          policy: local
-          hide_client_headers: true
-      - name: request-size-limiting
-        config:
-          allowed_payload_size: 1
-          size_unit: megabytes
-
-  - name: gotrue-magiclink-service
-    url: http://gotrue:9999/magiclink
-    routes:
-      - name: gotrue-magiclink-route
-        paths:
-          - /auth/magiclink
-    plugins:
-      - name: rate-limiting
-        config:
-          minute: ${OGNA_AUTH_RATE_LIMIT_MINUTE}
-          hour: ${OGNA_AUTH_RATE_LIMIT_HOUR}
+          second: 50
+          minute: 600
           policy: local
           hide_client_headers: true
       - name: request-size-limiting
@@ -134,7 +79,8 @@ services:
           size_unit: megabytes
 
   ##################################
-  # Dashboard (PUBLIC)
+  # OGNA services. ogna-guard checks Zitadel tokens and forwards an internal
+  # token + X-Authenticated-* headers to the upstream.
   ##################################
   - name: dashboard
     url: http://dashboard:3000
@@ -142,22 +88,27 @@ services:
       - name: dashboard-route
         paths:
           - /
+    plugins:
+      - name: ogna-guard
+        config:
+          require_auth: false
 
-  ##################################
-  # API SERVICE
-  ##################################
   - name: api-service
     url: http://api:8000
     routes:
-      - name: api-route
+      - name: api-service-route
         paths:
           - /api
     plugins:
-      - name: jwt
+      - name: ogna-guard
         config:
-          key_claim_name: aud
-          claims_to_verify:
-            - exp
+          require_auth: true
+      - name: cors
+        config:
+          origins: ${OGNA_CORS_ORIGINS}
+          methods: [GET, POST, PUT, PATCH, DELETE, OPTIONS]
+          headers: [Authorization, Content-Type]
+          credentials: true
       - name: rate-limiting
         config:
           second: 500
@@ -169,21 +120,22 @@ services:
           allowed_payload_size: 10
           size_unit: megabytes
 
-  ##################################
-  # STORAGE SERVICE
-  ##################################
   - name: storage-service
     url: http://storage:8000
     routes:
-      - name: storage-route
+      - name: storage-service-route
         paths:
           - /storage
     plugins:
-      - name: jwt
+      - name: ogna-guard
         config:
-          key_claim_name: aud
-          claims_to_verify:
-            - exp
+          require_auth: true
+      - name: cors
+        config:
+          origins: ${OGNA_CORS_ORIGINS}
+          methods: [GET, POST, PUT, PATCH, DELETE, OPTIONS]
+          headers: [Authorization, Content-Type]
+          credentials: true
       - name: rate-limiting
         config:
           second: 500
@@ -191,21 +143,22 @@ services:
           policy: local
           hide_client_headers: true
 
-  ##################################
-  # HASURA (GRAPHQL)
-  ##################################
   - name: hasura
     url: http://hasura:8080/v1/graphql
     routes:
-      - name: graphql
+      - name: hasura-route
         paths:
           - /graphql
     plugins:
-      - name: jwt
+      - name: ogna-guard
         config:
-          key_claim_name: aud
-          claims_to_verify:
-            - exp
+          require_auth: true
+      - name: cors
+        config:
+          origins: ${OGNA_CORS_ORIGINS}
+          methods: [GET, POST, PUT, PATCH, DELETE, OPTIONS]
+          headers: [Authorization, Content-Type]
+          credentials: true
       - name: rate-limiting
         config:
           second: 200
@@ -217,39 +170,4 @@ services:
           allowed_payload_size: 5
           size_unit: megabytes
 
-############################
-# GLOBAL PLUGINS
-############################
-
-plugins:
-  ##################################
-  # CORS
-  ##################################
-  - name: cors
-    config:
-      # Rendered from OGNA_CORS_ORIGINS (comma-separated) by the entrypoint
-      origins: ${OGNA_CORS_ORIGINS}
-      methods:
-        - GET
-        - POST
-        - PUT
-        - DELETE
-        - OPTIONS
-      headers:
-        - Authorization
-        - Content-Type
-      credentials: true
-
-  ##################################
-  # SECURITY GUARD (header stripping, claim forwarding, security headers)
-  ##################################
-  - name: ogna-guard
-    config:
-      jwt_secret: ${GOTRUE_JWT_SECRET}
-      db_host: postgres
-      db_port: 5432
-      db_name: ${POSTGRES_DB}
-      db_user: ogna_gateway
-      db_password: ${OGNA_GATEWAY_DB_PASSWORD}
-      session_cache_ttl: 5
-      revoked_cache_ttl: 300
+# END SERVICES

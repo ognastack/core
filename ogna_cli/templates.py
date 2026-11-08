@@ -9,7 +9,7 @@ CORE_COMPOSE_YAML = """services:
       - no-new-privileges:true
     networks:
       - api
-      - database
+      - auth
     environment:
       KONG_PLUGINS: bundled,cors,acme,ogna-guard
       KONG_HEADERS: "off"
@@ -22,9 +22,12 @@ CORE_COMPOSE_YAML = """services:
       KONG_LOG_LEVEL: ${KONG_LOG_LEVEL:-notice}
       KONG_DATABASE: "off"
       KONG_DECLARATIVE_CONFIG: /kong/kong.yaml
-      GOTRUE_JWT_SECRET: ${GOTRUE_JWT_SECRET:?GOTRUE_JWT_SECRET must be set}
-      POSTGRES_DB: ${POSTGRES_DB}
-      OGNA_GATEWAY_DB_PASSWORD: ${OGNA_GATEWAY_DB_PASSWORD}
+      OGNA_INTERNAL_JWT_SECRET: ${OGNA_INTERNAL_JWT_SECRET:?OGNA_INTERNAL_JWT_SECRET must be set}
+      OGNA_AUTH_DOMAIN: ${OGNA_AUTH_DOMAIN:-auth.localhost}
+      OGNA_AUTH_EXTERNAL_SECURE: ${OGNA_AUTH_EXTERNAL_SECURE:-false}
+      OGNA_AUTH_ACTIVE_CACHE_TTL: ${OGNA_AUTH_ACTIVE_CACHE_TTL:-5}
+      OGNA_AUTH_INACTIVE_CACHE_TTL: ${OGNA_AUTH_INACTIVE_CACHE_TTL:-300}
+      OGNA_INTERNAL_JWT_TTL: ${OGNA_INTERNAL_JWT_TTL:-300}
       OGNA_EXTRA_ROUTES: ${OGNA_EXTRA_ROUTES:-}
       OGNA_CORS_ORIGINS: ${OGNA_CORS_ORIGINS:-}
       OGNA_AUTH_RATE_LIMIT_MINUTE: ${OGNA_AUTH_RATE_LIMIT_MINUTE:-10}
@@ -40,6 +43,11 @@ CORE_COMPOSE_YAML = """services:
       timeout: 10s
       retries: 10
       start_period: 30s
+    volumes:
+      - zitadel_bootstrap:/zitadel/bootstrap:ro
+    depends_on:
+      zitadel-setup:
+        condition: service_completed_successfully
 
   db-init:
     image: ${OGNA_MIGRATIONS_IMAGE:-ghcr.io/ognastack/migrations:main}
@@ -54,36 +62,112 @@ CORE_COMPOSE_YAML = """services:
     networks:
       - database
 
-  gotrue:
-    image: supabase/auth:v2.178.0
+  zitadel:
+    image: ghcr.io/zitadel/zitadel:v4.16.0
+    container_name: zitadel
+    restart: unless-stopped
+    user: "0"
+    command: start-from-init --masterkeyFromEnv
     environment:
-      GOTRUE_DISABLE_SIGNUP: ${GOTRUE_DISABLE_SIGNUP:-false}
-      GOTRUE_MAILER_AUTOCONFIRM: ${GOTRUE_MAILER_AUTOCONFIRM:-true}
-      GOTRUE_URI_ALLOW_LIST: ${GOTRUE_URI_ALLOW_LIST:-}
-      GOTRUE_API_HOST: "0.0.0.0"
-      GOTRUE_API_PORT: 9999
-      GOTRUE_DB_DRIVER: "postgres"
-      GOTRUE_JWT_AUD: "authenticated"
-      GOTRUE_JWT_EXP: ${GOTRUE_JWT_EXP:-3600}
-      GOTRUE_JWT_DEFAULT_GROUP_NAME: "authenticated"
-      GOTRUE_JWT_SECRET: ${GOTRUE_JWT_SECRET}
-      GOTRUE_SITE_URL: ${GOTRUE_SITE_URL:-http://localhost}
-      DATABASE_URL: "postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?search_path=auth"
-    expose:
-      - "9999"
+      ZITADEL_MASTERKEY: ${ZITADEL_MASTERKEY:?ZITADEL_MASTERKEY must be set (exactly 32 characters)}
+      ZITADEL_PORT: 8080
+      ZITADEL_EXTERNALDOMAIN: ${OGNA_AUTH_DOMAIN:-auth.localhost}
+      ZITADEL_EXTERNALPORT: ${OGNA_AUTH_EXTERNAL_PORT:-8000}
+      ZITADEL_EXTERNALSECURE: ${OGNA_AUTH_EXTERNAL_SECURE:-false}
+      ZITADEL_TLS_ENABLED: "false"
+      # Own database + unprivileged user, created on first start with the admin login
+      ZITADEL_DATABASE_POSTGRES_HOST: postgres
+      ZITADEL_DATABASE_POSTGRES_PORT: 5432
+      ZITADEL_DATABASE_POSTGRES_DATABASE: zitadel
+      ZITADEL_DATABASE_POSTGRES_USER_USERNAME: zitadel
+      ZITADEL_DATABASE_POSTGRES_USER_PASSWORD: ${ZITADEL_DB_PASSWORD:?ZITADEL_DB_PASSWORD must be set}
+      ZITADEL_DATABASE_POSTGRES_USER_SSL_MODE: disable
+      ZITADEL_DATABASE_POSTGRES_ADMIN_USERNAME: ${POSTGRES_USER}
+      ZITADEL_DATABASE_POSTGRES_ADMIN_PASSWORD: ${POSTGRES_PASSWORD}
+      ZITADEL_DATABASE_POSTGRES_ADMIN_SSL_MODE: disable
+      # First instance: organization, human admin (console login) and service accounts
+      ZITADEL_FIRSTINSTANCE_INSTANCENAME: OGNA
+      ZITADEL_FIRSTINSTANCE_ORG_NAME: ${OGNA_AUTH_ORG_NAME:-OGNA}
+      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_USERNAME: ${OGNA_AUTH_ADMIN_EMAIL:-admin@example.com}
+      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_EMAIL_ADDRESS: ${OGNA_AUTH_ADMIN_EMAIL:-admin@example.com}
+      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORD: ${OGNA_AUTH_ADMIN_PASSWORD:?OGNA_AUTH_ADMIN_PASSWORD must be set}
+      ZITADEL_FIRSTINSTANCE_ORG_HUMAN_PASSWORDCHANGEREQUIRED: "false"
+      ZITADEL_FIRSTINSTANCE_PATPATH: /zitadel/bootstrap/admin.pat
+      ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINE_USERNAME: ogna-setup
+      ZITADEL_FIRSTINSTANCE_ORG_MACHINE_MACHINE_NAME: OGNA setup (IAM_OWNER)
+      ZITADEL_FIRSTINSTANCE_ORG_MACHINE_PAT_EXPIRATIONDATE: "2099-01-01T00:00:00Z"
+      ZITADEL_FIRSTINSTANCE_LOGINCLIENTPATPATH: /zitadel/bootstrap/login-client.pat
+      ZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_MACHINE_USERNAME: login-client
+      ZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_MACHINE_NAME: Automatically Initialized IAM_LOGIN_CLIENT
+      ZITADEL_FIRSTINSTANCE_ORG_LOGINCLIENT_PAT_EXPIRATIONDATE: "2099-01-01T00:00:00Z"
+      # Instance defaults (applied when the instance is first created)
+      ZITADEL_DEFAULTINSTANCE_LOGINPOLICY_ALLOWREGISTER: ${OGNA_AUTH_ALLOW_REGISTER:-true}
+      ZITADEL_DEFAULTINSTANCE_LOCKOUTPOLICY_MAXPASSWORDATTEMPTS: ${OGNA_AUTH_MAX_PASSWORD_ATTEMPTS:-0}
+      # Login V2 (separate Next.js container), served under /ui/v2/login on the auth domain
+      ZITADEL_DEFAULTINSTANCE_FEATURES_LOGINV2_REQUIRED: "true"
+      ZITADEL_DEFAULTINSTANCE_FEATURES_LOGINV2_BASEURI: ${OGNA_AUTH_PUBLIC_SCHEME:-http}://${OGNA_AUTH_DOMAIN:-auth.localhost}:${OGNA_AUTH_EXTERNAL_PORT:-8000}/ui/v2/login/
+      ZITADEL_OIDC_DEFAULTLOGINURLV2: ${OGNA_AUTH_PUBLIC_SCHEME:-http}://${OGNA_AUTH_DOMAIN:-auth.localhost}:${OGNA_AUTH_EXTERNAL_PORT:-8000}/ui/v2/login/login?authRequest=
+      ZITADEL_OIDC_DEFAULTLOGOUTURLV2: ${OGNA_AUTH_PUBLIC_SCHEME:-http}://${OGNA_AUTH_DOMAIN:-auth.localhost}:${OGNA_AUTH_EXTERNAL_PORT:-8000}/ui/v2/login/logout?post_logout_redirect=
+      ZITADEL_SAML_DEFAULTLOGINURLV2: ${OGNA_AUTH_PUBLIC_SCHEME:-http}://${OGNA_AUTH_DOMAIN:-auth.localhost}:${OGNA_AUTH_EXTERNAL_PORT:-8000}/ui/v2/login/login?samlRequest=
+    healthcheck:
+      test: ["CMD", "/app/zitadel", "ready"]
+      interval: 10s
+      timeout: 30s
+      retries: 12
+      start_period: 30s
+    volumes:
+      - zitadel_bootstrap:/zitadel/bootstrap:rw
+    networks:
+      - auth
+      - database
     depends_on:
       postgres:
         condition: service_healthy
-      db-init:
-        condition: service_completed_successfully
-    networks:
-      - api
-      - database
+
+  zitadel-login:
+    image: ghcr.io/zitadel/zitadel-login:v4.16.0
+    container_name: zitadel-login
+    restart: unless-stopped
+    user: "0"
+    environment:
+      ZITADEL_API_URL: http://zitadel:8080
+      NEXT_PUBLIC_BASE_PATH: /ui/v2/login
+      ZITADEL_SERVICE_USER_TOKEN_FILE: /zitadel/bootstrap/login-client.pat
+      ZITADEL_SESSION_COOKIE_SECRET: ${ZITADEL_LOGIN_COOKIE_SECRET:?ZITADEL_LOGIN_COOKIE_SECRET must be set}
+      CUSTOM_REQUEST_HEADERS: Host:${OGNA_AUTH_DOMAIN:-auth.localhost},X-Forwarded-Proto:${OGNA_AUTH_PUBLIC_SCHEME:-http}
     healthcheck:
-      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9999/health"]
-      interval: 5s
-      timeout: 3s
-      retries: 5
+      test: ["CMD", "/bin/sh", "-c", "node /app/healthcheck.mjs http://localhost:3000/ui/v2/login/healthy"]
+      interval: 10s
+      timeout: 30s
+      retries: 12
+      start_period: 20s
+    volumes:
+      - zitadel_bootstrap:/zitadel/bootstrap:ro
+    networks:
+      - auth
+    depends_on:
+      zitadel:
+        condition: service_healthy
+
+  zitadel-setup:
+    image: ${OGNA_ZITADEL_SETUP_IMAGE:-ghcr.io/ognastack/zitadel-setup:main}
+    container_name: zitadel-setup
+    restart: on-failure
+    environment:
+      OGNA_AUTH_DOMAIN: ${OGNA_AUTH_DOMAIN:-auth.localhost}
+      OGNA_AUTH_EXTERNAL_PORT: ${OGNA_AUTH_EXTERNAL_PORT:-8000}
+      OGNA_AUTH_EXTERNAL_SECURE: ${OGNA_AUTH_EXTERNAL_SECURE:-false}
+      OGNA_AUTH_PROJECT_NAME: ${OGNA_AUTH_PROJECT_NAME:-OGNA}
+      OGNA_OIDC_REDIRECT_URIS: ${OGNA_OIDC_REDIRECT_URIS:-http://localhost:8000/auth/callback,http://localhost:3000/auth/callback,http://localhost:5173/auth/callback}
+      OGNA_OIDC_POST_LOGOUT_URIS: ${OGNA_OIDC_POST_LOGOUT_URIS:-http://localhost:8000/,http://localhost:3000/,http://localhost:5173/}
+    volumes:
+      - zitadel_bootstrap:/zitadel/bootstrap:rw
+      - zitadel_public:/zitadel/public:rw
+    networks:
+      - auth
+    depends_on:
+      zitadel:
+        condition: service_healthy
 
   postgres:
     image: postgres:18.1-alpine
@@ -115,13 +199,10 @@ CORE_COMPOSE_YAML = """services:
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
       DBMATE_MIGRATIONS_TABLE: migrations.schema_migrations
-      OGNA_GATEWAY_DB_PASSWORD: ${OGNA_GATEWAY_DB_PASSWORD}
       DBMATE_MIGRATIONS_DIR: "/db/migrations"
       DBMATE_NO_DUMP_SCHEMA: "true"
     depends_on:
       postgres:
-        condition: service_healthy
-      gotrue:
         condition: service_healthy
     command: up
     restart: on-failure
@@ -141,7 +222,8 @@ CORE_COMPOSE_YAML = """services:
       DATABASE_PASSWORD: ${POSTGRES_PASSWORD}
       DATABASE_NAME: ${POSTGRES_DB}
       STORAGE_TYPE: ${STORAGE_TYPE:-S3}
-      GOTRUE_JWT_SECRET: ${GOTRUE_JWT_SECRET}
+      # Storage verifies the gateway's internal token (variable name kept for the storage image)
+      GOTRUE_JWT_SECRET: ${OGNA_INTERNAL_JWT_SECRET}
       GRAPHQL_HOST: "http://hasura:8080"
       GRAPHQL_ENDPOINT: "v1/graphql"
       GRAPHQL_SECRET: ${HASURA_GRAPHQL_ADMIN_SECRET}
@@ -168,6 +250,8 @@ CORE_COMPOSE_YAML = """services:
         condition: service_healthy
     networks:
       - api
+    volumes:
+      - zitadel_public:/zitadel/public:ro
 
   hasura:
     image: ${OGNA_HASURA_IMAGE:-ghcr.io/ognastack/hasura:main}
@@ -189,7 +273,7 @@ CORE_COMPOSE_YAML = """services:
       HASURA_GRAPHQL_JWT_SECRET: >
         {
           "type": "HS256",
-          "key": "${GOTRUE_JWT_SECRET}",
+          "key": "${OGNA_INTERNAL_JWT_SECRET}",
           "claims_map": {
             "x-hasura-user-id": { "path": "$.sub" },
             "x-hasura-default-role": { "path": "$.role" },
@@ -203,12 +287,18 @@ CORE_COMPOSE_YAML = """services:
         condition: service_completed_successfully
 
 volumes:
+  zitadel_bootstrap:
+    driver: local
+  zitadel_public:
+    driver: local
   postgres_data:
     driver: local
   temp_files:
     driver: local
 
 networks:
+  auth:
+    driver: bridge
   storage:
     driver: bridge
   database:
@@ -298,8 +388,6 @@ POSTGRES_PASSWORD={postgres_password}
 POSTGRES_DB={project_db}
 POSTGRES_NON_ROOT_USER=ogna_user
 POSTGRES_NON_ROOT_PASSWORD={postgres_password}
-ENCRYPTION_KEY={encryption_key}
-GOTRUE_JWT_SECRET={jwt_secret}
 API_EXTERNAL_URL="localhost:8000"
 API_IMAGE="{api_image}"
 OGNA_EXTRA_ROUTES=""
@@ -307,9 +395,28 @@ STORAGE_TYPE="S3"
 S3_SECRET_KEY={s3_secret}
 S3_ENDPOINT_URL=http://rustfs:9000
 S3_ACCESS_KEY=rustfsadmin
-GOTRUE_JWT_EXP=3600
-OGNA_GATEWAY_DB_PASSWORD={gateway_db_password}
 HASURA_GRAPHQL_ADMIN_SECRET={hasura_secret}
+
+# --- Identity (Zitadel) ---
+# Public hostname of the identity provider; *.localhost resolves to this machine in browsers.
+OGNA_AUTH_DOMAIN=auth.localhost
+OGNA_AUTH_EXTERNAL_PORT=8000
+OGNA_AUTH_EXTERNAL_SECURE=false
+OGNA_AUTH_PUBLIC_SCHEME=http
+OGNA_AUTH_ADMIN_EMAIL=admin@example.com
+OGNA_AUTH_ADMIN_PASSWORD={auth_admin_password}
+# Exactly 32 characters; encrypts Zitadel's secrets at rest. Never change or lose it.
+ZITADEL_MASTERKEY={zitadel_masterkey}
+ZITADEL_DB_PASSWORD={zitadel_db_password}
+ZITADEL_LOGIN_COOKIE_SECRET={zitadel_cookie_secret}
+# Signs the short-lived tokens the gateway forwards to Hasura, Storage and your API.
+OGNA_INTERNAL_JWT_SECRET={internal_jwt_secret}
+# OIDC app "ogna-web" (created by zitadel-setup): where your frontends redirect after login/logout
+OGNA_OIDC_REDIRECT_URIS=http://localhost:8000/auth/callback,http://localhost:3000/auth/callback,http://localhost:5173/auth/callback
+OGNA_OIDC_POST_LOGOUT_URIS=http://localhost:8000/,http://localhost:3000/,http://localhost:5173/
+# Per-IP limit on Zitadel's token endpoint. Raise for the integration test suite.
+OGNA_AUTH_RATE_LIMIT_MINUTE=10
+OGNA_AUTH_RATE_LIMIT_HOUR=100
 """
 
 GITIGNORE_TEMPLATE = """# Environment & secrets

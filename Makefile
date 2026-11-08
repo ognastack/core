@@ -1,4 +1,4 @@
-.PHONY: help env up up-external-s3 up-core build down clean restart logs ps status test test-cli install-cli
+.PHONY: help env auth-info up up-external-s3 up-core build down clean restart logs ps status test test-cli install-cli
 
 COMPOSE_BASE := docker compose -f docker-compose.yaml
 COMPOSE_FULL := $(COMPOSE_BASE) -f docker-compose-api.yaml -f docker-compose-storage.yaml
@@ -13,18 +13,24 @@ help: ## Show available Make targets
 env: ## Create .env from .env.example (with generated secrets) if missing
 	@if [ ! -f .env ]; then \
 		cp .env.example .env; \
-		gen() { openssl rand -hex 24 2>/dev/null || python3 -c 'import secrets; print(secrets.token_hex(24))'; }; \
-		pg=$$(gen); \
+		gen() { openssl rand -hex "$$1" 2>/dev/null || python3 -c "import secrets,sys; print(secrets.token_hex(int(sys.argv[1])))" "$$1"; }; \
+		pg=$$(gen 24); \
 		sed -i.bak \
 			-e "s|^POSTGRES_PASSWORD=change_me.*|POSTGRES_PASSWORD=$$pg|" \
 			-e "s|^POSTGRES_NON_ROOT_PASSWORD=change_me.*|POSTGRES_NON_ROOT_PASSWORD=$$pg|" \
-			-e "s|^ENCRYPTION_KEY=change_me.*|ENCRYPTION_KEY=$$(gen)|" \
-			-e "s|^GOTRUE_JWT_SECRET=change_me.*|GOTRUE_JWT_SECRET=$$(gen)|" \
-			-e "s|^OGNA_GATEWAY_DB_PASSWORD=change_me.*|OGNA_GATEWAY_DB_PASSWORD=$$(gen)|" \
-			-e "s|^HASURA_GRAPHQL_ADMIN_SECRET=change_me.*|HASURA_GRAPHQL_ADMIN_SECRET=$$(gen)|" \
+			-e "s|^HASURA_GRAPHQL_ADMIN_SECRET=change_me.*|HASURA_GRAPHQL_ADMIN_SECRET=$$(gen 24)|" \
+			-e "s|^OGNA_AUTH_ADMIN_PASSWORD=change_me.*|OGNA_AUTH_ADMIN_PASSWORD=$$(gen 14)Aa1!|" \
+			-e "s|^ZITADEL_MASTERKEY=change_me.*|ZITADEL_MASTERKEY=$$(gen 16)|" \
+			-e "s|^ZITADEL_DB_PASSWORD=change_me.*|ZITADEL_DB_PASSWORD=$$(gen 24)|" \
+			-e "s|^ZITADEL_LOGIN_COOKIE_SECRET=change_me.*|ZITADEL_LOGIN_COOKIE_SECRET=$$(gen 24)|" \
+			-e "s|^OGNA_INTERNAL_JWT_SECRET=change_me.*|OGNA_INTERNAL_JWT_SECRET=$$(gen 32)|" \
 			.env && rm -f .env.bak; \
 		echo "Created .env from .env.example with generated secrets"; \
+		echo "Zitadel console: http://auth.localhost:8000/ui/console (login: $$(sed -n 's/^OGNA_AUTH_ADMIN_EMAIL=//p' .env), password in .env)"; \
 	fi
+
+auth-info: ## Show the OIDC issuer and client id for your frontends
+	@docker run --rm --volumes-from zitadel-setup alpine cat /zitadel/public/web-client.json
 
 up: env ## Stand up the full stack (Core + API + local RustFS S3)
 	$(COMPOSE_FULL) up -d --build

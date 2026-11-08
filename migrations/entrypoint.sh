@@ -14,21 +14,9 @@ if [ "$ACTION" = "init" ]; then
 fi
 
 if [ "$ACTION" = "up" ]; then
-  # Render core migrations, injecting the gateway's read-only DB password
-  GATEWAY_PASS="${OGNA_GATEWAY_DB_PASSWORD:-}"
-  if ! printf '%s' "$GATEWAY_PASS" | grep -Eq '^[A-Za-z0-9_-]{16,}$'; then
-    echo "[ogna-migrations] OGNA_GATEWAY_DB_PASSWORD must be set (16+ chars, letters/digits/_/- only)." >&2
-    exit 1
-  fi
-  RENDERED_DIR="/tmp/core-migrations"
-  rm -rf "$RENDERED_DIR" && mkdir -p "$RENDERED_DIR"
-  for f in /db/core-migrations/*.sql; do
-    sed "s|__OGNA_GATEWAY_DB_PASSWORD__|${GATEWAY_PASS}|g" "$f" > "$RENDERED_DIR/$(basename "$f")"
-  done
-
   echo "[ogna-migrations] Applying OGNA core migrations..."
   dbmate \
-    --migrations-dir "$RENDERED_DIR" \
+    --migrations-dir "/db/core-migrations" \
     --migrations-table "migrations.core_schema_migrations" \
     --no-dump-schema \
     up

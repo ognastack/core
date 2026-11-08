@@ -26,6 +26,9 @@ jobs:
           - name: hasura
             context: ./hasura-config
             image: ghcr.io/ognastack/hasura
+          - name: zitadel-setup
+            context: ./zitadel-setup
+            image: ghcr.io/ognastack/zitadel-setup
 
     steps:
       - name: Checkout repository
