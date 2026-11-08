@@ -5,253 +5,335 @@ It provides the essential building blocks required to run a modern backend while
 
 ---
 
+## Why OGNA? (Pluggable Backend Container)
+
+Most Firebase alternatives tightly couple your backend logic to Postgres + REST/GraphQL, limiting how you build and scale your application.
+
+OGNA is different by design:
+
+- **Swap your backend container anytime** — Your backend is just a Docker image (`API_IMAGE`) exposing port `8000` internally.
+- **Any language or framework** — Use Go, Rust, Python, Node.js, Java, C#, or anything that runs in a container.
+- **Zero auth boilerplate in your backend** — Kong validates JWTs, checks Redis for revoked tokens, and enforces rate limits before requests ever reach `/api/*`.
+
+---
+
 ## What OGNA Provides
 
 - **Database** — PostgreSQL 18.1
 - **Authentication** — GoTrue (email/password, OAuth, JWT)
-- **Storage** — S3-compatible object storage
-- **API Gateway** — Kong for routing, JWT validation, and rate limiting
-- **Pluggable Backend** — Bring your own backend in any language as a Docker container
+- **Storage** — S3-compatible object storage (`ghcr.io/ognastack/storage:latest` + local RustFS or external S3)
+- **API Gateway** — Kong (`ghcr.io/ognastack/gateway`) for routing, JWT validation, Redis token blacklisting, and rate limiting
+- **GraphQL Engine** — Hasura (`ghcr.io/ognastack/hasura`) pre-configured with storage metadata & JWT claims
+- **Database Migrations** — Automated core + user SQL migrations (`ghcr.io/ognastack/migrations` powered by `dbmate`)
+- **Pluggable Backend** — Bring your own backend Docker image (`API_IMAGE`)
 
 ---
 
-## Why OGNA?
+## How It Works
 
-Most Firebase alternatives tightly couple your backend logic to Postgres + REST (or GraphQL), limiting how you can build and scale your application.
+OGNA separates **core infrastructure** from **your application container & migrations**:
 
-OGNA is different by design:
-
-- Your backend is **just another Docker service**
-- You can use **any language or framework**
-- You control your data model and business logic
-- Authentication, security, and routing are handled for you
-
----
-
-## Architecture
-
-- All `/api/*` requests → **Your backend service** (JWT protected)
-- `/auth/*` requests → **GoTrue** (public authentication endpoints)
-- `/storage/*` requests → **S3-compatible storage** (JWT protected)
-- **Kong** acts as the single entry point:
-  - Routing
-  - JWT validation
-  - Rate limiting
+1. **Swappable Backend Container (`api`)**:
+   - Defined in `docker-compose.yaml` (or `docker-compose-api.yaml` in `core`) using `image: ${API_IMAGE:-ogna-py-appi:prod}`.
+   - You can swap the backend container at any time via `ogna set-api <image>`, `ogna up --api-image <image>`, or by changing `API_IMAGE` in `.env`.
+2. **Self-Contained Core Images (No Submodule Needed)**:
+   - **Gateway (`ghcr.io/ognastack/gateway`)**: Packages Kong Gateway, the `jwt-blacklist` Lua plugin, and `kong.yaml`, dynamically injecting `GOTRUE_JWT_SECRET` and `REDIS_PASSWORD` from `.env`.
+   - **Migrations (`ghcr.io/ognastack/migrations`)**: Pre-initializes `auth` and `migrations` schemas (`db-init`), automatically runs OGNA's internal migrations, and then applies **your project's SQL migrations** from `./migrations`.
+   - **Hasura (`ghcr.io/ognastack/hasura`)**: Packages Hasura GraphQL Engine with OGNA's storage permissions and metadata pre-loaded.
 
 ---
 
-## Services
+## 1. Creating a Project (Using the `ogna` CLI)
 
-| Service   | Description                                  | Port      |
-|-----------|----------------------------------------------|-----------|
-| Kong      | API Gateway, routing, JWT validation          | 8000/8001 |
-| GoTrue    | Authentication & JWT issuance                 | 9999      |
-| API       | Your backend service (pluggable)              | 8000      |
-| Postgres  | Primary database                              | 5432      |
-| Redis     | JWT invalidation cache                        | 6379      |
-| RustFS    | S3-compatible object storage (MinIO alternative) | 9000 (Optional) |
-| Flyway    | Database migrations                           | N/A       |
+This is the recommended workflow when running a project on top of OGNA—no Git submodule or infrastructure config folders needed.
 
----
-
-## Security
-
-OGNA supports **JWT token invalidation** using Redis.
-
-- On logout, the JWT is added to a Redis-backed blacklist
-- Any future request using that token is rejected
-- Users must re-authenticate to obtain a new token
-
----
-
-## Pluggable Backend Service
-
-OGNA allows you to integrate **any backend implementation**.
-
-### How It Works
-
-- Your backend runs as a Docker container
-- It is defined in `docker-compose-api.yaml`
-- Kong automatically routes `/api/*` traffic to it
-- JWT validation and rate limiting are enforced by Kong
-
-### Example
-
-```yaml
-api:
-  image: ogna-py-app:dev
-  container_name: api
-  restart: unless-stopped
-  depends_on:
-    ogna-database:
-      condition: service_healthy
-    kong-cp:
-      condition: service_healthy
-  expose:
-    - "8000"
-  networks:
-    - ogna
-```
-
-### Backend Requirements
-
-- Must expose port **8000**, dont expose it publicaly
-- No authentication logic required in the backend
-
----
-
-## Setup
-
-### 1. Clone the repository
+### Step 1: Install the `ogna` CLI
 
 ```bash
-git clone <repo-url>
-cd <repo-folder>
+# Via pipx (recommended)
+pipx install git+https://github.com/ognastack/core.git
+
+# Or via pip from a local clone of this repo
+pip install -e .
 ```
 
-### 2. Environment variables
+### Step 2: Initialize Your Project (`ogna init`)
 
-Create a `.env` file containing:
+Initialize a project pointing to your backend Docker image:
 
-- Database credentials
-- GoTrue secrets
-- Database credentials
-- GoTrue secrets
-- JWT configuration
+```bash
+ogna init my-app --api-image my-org/my-backend:latest
+cd my-app
+```
 
-| Variable | Description | Default |
-|----------|-------------|---------|
+*(Optional: pass `--scaffold-api` if you want `ogna init` to also generate a starter `./api` Dockerfile directory.)*
+
+This creates a clean directory with cryptographically generated secrets in `.env`:
+
+```text
+my-app/
+├── migrations/                 # Strictly your application's SQL migrations
+│   └── 20260101000000_init.sql
+├── hasura/
+│   └── tables/                 # Your custom Hasura table/permission YAML files (auto-merged with core)
+├── docker-compose.yaml         # Pluggable `api` service (`image: ${API_IMAGE}`) & mounts
+├── .env                        # Auto-generated secrets + API_IMAGE (gitignored)
+├── .env.example                # Safe template to commit to git
+├── .gitignore                  # Ignores .env and .ogna/
+└── README.md
+```
+
+### Step 3: Swap Your API Container Anytime
+
+Your backend container only needs to listen on port **`8000`** (do not publish it publicly; Kong routes `/api/*` to `http://api:8000`).
+
+You can swap your backend Docker image at any time:
+
+```bash
+# 1. Update API_IMAGE in .env
+ogna set-api my-org/my-go-api:v2
+
+# 2. Update API_IMAGE and immediately restart the running `api` container in-place
+ogna set-api my-org/my-rust-api:latest --restart
+
+# 3. Or specify the image directly when starting the stack
+ogna up -d --api-image my-org/my-node-api:dev
+```
+
+### Step 4: Add Additional Services to the Stack
+
+You can extend the stack with as many extra containers as you need—such as additional microservices, background workers, message queues, or vector databases.
+
+#### Option A: Via the CLI (`ogna add-service`)
+
+```bash
+# 1. Add a JWT-protected microservice exposed through Kong at /payments
+ogna add-service payments --image my-org/payments-api:latest --port 8000 --route /payments
+
+# 2. Add a public microservice exposed through Kong at /webhooks (no JWT required)
+ogna add-service webhooks --image my-org/webhooks-service:latest --port 8080 --route /webhooks --public
+
+# 3. Add an internal/background service (e.g. worker or vector DB, not exposed on Kong)
+ogna add-service worker --image my-org/celery-worker:latest
+```
+
+When `--route` is provided, `ogna` appends the service to `docker-compose.yaml` **and** updates `OGNA_EXTRA_ROUTES` in `.env` so Kong automatically routes traffic to it.
+
+#### Option B: Manually in `docker-compose.yaml`
+
+Your project's `docker-compose.yaml` is standard Docker Compose merged with OGNA Core. You can add any service directly and attach it to OGNA's internal networks (`api`, `database`, `gql`, `storage`, `tokens`):
+
+```yaml
+services:
+  migrations:
+    volumes:
+      - ./migrations:/db/migrations:ro
+
+  api:
+    image: ${API_IMAGE:-ogna-py-appi:prod}
+    container_name: api
+    restart: unless-stopped
+    depends_on:
+      - postgres
+      - kong-cp
+    expose:
+      - "8000"
+    networks:
+      - gql
+      - api
+      - database
+    env_file:
+      - .env
+
+  # Example: Add a Qdrant vector database or background worker
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: qdrant
+    expose:
+      - "6333"
+    networks:
+      - api
+      - database
+```
+
+### Step 5: Add Database Migrations & Track Tables in Hasura
+
+In OGNA, application services (`api`, `storage`, and custom microservices) do **not** connect directly to Postgres—all data access goes through **Hasura (`http://hasura:8080/v1/graphql`)**, which enforces row-level and column-level permissions per user JWT.
+
+#### 1. Create a SQL Migration (`ogna migration new`)
+
+```bash
+ogna migration new create_profiles_table
+```
+
+Edit `./migrations/<timestamp>_create_profiles_table.sql`:
+
+```sql
+-- migrate:up
+CREATE TABLE public.profiles (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES auth.users(id) ON DELETE CASCADE,
+    username TEXT UNIQUE NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- migrate:down
+DROP TABLE IF EXISTS public.profiles;
+```
+
+#### 2. Track the Table & Permissions in Hasura (`ogna track-table`)
+
+Generate a Hasura table metadata file in `./hasura/tables/` (which OGNA automatically merges with core `storage` metadata on startup):
+
+```bash
+# Scope row-level select/insert/update/delete permissions to the logged-in user (X-Hasura-User-Id)
+ogna track-table public.profiles --owner-column user_id
+
+# Or allow all authenticated users to query/mutate specific columns
+ogna track-table public.items --columns id,name,created_at
+```
+
+#### 3. Optional: Use the Visual Hasura Admin Console (`ogna console`)
+
+For security, the Hasura Console is disabled by default. During local development, you can enable it on `http://127.0.0.1:8080/console` (bound strictly to localhost):
+
+```bash
+# Enable console, print the Admin Secret, and restart Hasura
+ogna console --restart
+
+# Disable console when finished
+ogna console --disable --restart
+```
+
+### Step 6: Start, Inspect, and Stop the Stack
+
+```bash
+# Start all services in the background
+ogna up -d
+
+# Or start with an external S3 provider (skips local RustFS container)
+ogna up -d --external-s3
+
+# Check container status and gateway URLs
+ogna status
+
+# Stream logs (all services or just your `api` container)
+ogna logs -f
+ogna logs -f api
+
+# Stop the stack
+ogna down
+```
+
+---
+
+## 2. Running the `core` Repository Directly
+
+Use this workflow if you are developing `core` itself or running directly via `docker compose` without the CLI.
+
+### Step 1: Clone `core` and Configure `.env`
+
+```bash
+git clone https://github.com/ognastack/core.git
+cd core
+cp .env.example .env
+```
+
+Set `API_IMAGE` (and any other credentials) in `.env`:
+
+| Variable | Description | Default in `.env.example` |
+|----------|-------------|---------------------------|
+| `API_IMAGE` | **Your pluggable backend Docker image** | `ogna-py-appi:prod` |
 | `POSTGRES_USER` | Database user | `ogna_user` |
 | `POSTGRES_PASSWORD` | Database password | `supersecretpassword` |
 | `POSTGRES_DB` | Database name | `ogna_db` |
-| `GOTRUE_JWT_SECRET` | JWT Secret (must match Kong) | `superlongjwtsecret` |
-| `ENCRYPTION_KEY` | GOTRUE encryption key | `superlongjwtsecret` |
-| `API_EXTERNAL_URL` | External URL for API | `localhost:8000` |
+| `GOTRUE_JWT_SECRET` | Shared JWT secret (GoTrue, Kong, Storage, Hasura) | `vPDsBi2TafJuP4iqp40qx60AR34Qf6hQgC8GWBB7GoOKGqL9V6` |
+| `ENCRYPTION_KEY` | GoTrue encryption key | `vPDsBi2TafJuP4iqp40qx60AR34Qf6hQgC8GWBB7GoOKGqL9V6` |
+| `REDIS_PASSWORD` | Redis password (used by Redis & Kong `jwt-blacklist`) | `averylongandsecurepassword` |
+| `HASURA_GRAPHQL_ADMIN_SECRET` | Hasura admin secret | `a_very_secure_password` |
 | `STORAGE_TYPE` | Storage backend type | `S3` |
+| `S3_ENDPOINT_URL` | S3 endpoint URL | `http://rustfs:9000` |
+| `S3_ACCESS_KEY` | S3 access key | `rustfsadmin` |
+| `S3_SECRET_KEY` | S3 secret key | `rustfsadmin` |
 
-**External S3 Configuration (Optional)**
+### Step 2: Start the Core Stack (Makefile or Docker Compose)
 
-If you prefer to use an external S3 provider (AWS, DigitalOcean, etc.) instead of the self-hosted RustFS, omit `docker-compose-storage.yaml` and set these additional variables:
-
-| Variable | Description |
-|----------|-------------|
-| `S3_ENDPOINT_URL` | S3 Endpoint (e.g., `https://sfo3.digitaloceanspaces.com`) |
-| `S3_ACCESS_KEY` | Access Key ID |
-| `S3_SECRET_KEY` | Secret Access Key |
-| `S3_BUCKET_NAME` | Bucket Name |
-| `S3_REGION` | AWS Region (if applicable) |
-
-### 3. Secrets
-
-Create a `secrets` directory and add the following files:
-
-- `secrets/redis_password.txt`: Put your secure Redis password in this file.
+You can stand up and manage the stack quickly using `make`:
 
 ```bash
-mkdir -p secrets
-echo "your_redis_password" > secrets/redis_password.txt
+make up               # Stand up full stack (Core + API + local RustFS S3)
+make up-external-s3   # Stand up Core + API (external S3)
+make up-core          # Stand up Core + local RustFS S3 (without API container)
+make logs             # Follow container logs (or `make logs SERVICE=api`)
+make ps               # Check running containers
+make down             # Stop all containers
+make clean            # Stop all containers and remove volumes
 ```
 
-### 3. Database migrations
+Or run `docker compose` directly:
 
-All SQL migrations should be placed in the `./migrations` directory.
-They will be applied automatically using **Flyway** during startup.
-
----
-
-## Running the Stack
-
-Start all services:
-
-### Standard (Self-hosted Storage)
-
-Use this if you don't have an external S3 bucket. It spins up **RustFS** as a local S3 provider.
+#### Option A: Standard (Core + Pluggable API + Self-Hosted RustFS Storage)
 
 ```bash
-docker compose -f docker-compose.yaml -f docker-compose-api.yaml -f docker-compose-storage.yaml up -d
+docker compose \
+  -f docker-compose.yaml \
+  -f docker-compose-api.yaml \
+  -f docker-compose-storage.yaml \
+  up -d --build
 ```
 
-### External S3
-
-Use this if you have configured S3 environment variables and don't need local storage.
+To swap the API container on the fly without editing `docker-compose-api.yaml`:
 
 ```bash
-docker compose -f docker-compose.yaml -f docker-compose-api.yaml up -d
+API_IMAGE=my-custom-backend:latest docker compose \
+  -f docker-compose.yaml \
+  -f docker-compose-api.yaml \
+  -f docker-compose-storage.yaml \
+  up -d
 ```
 
-View logs:
+#### Option B: External S3 (Omits Local RustFS Container)
 
 ```bash
+docker compose \
+  -f docker-compose.yaml \
+  -f docker-compose-api.yaml \
+  up -d --build
+```
+
+### Step 3: View Logs & Stop `core`
+
+```bash
+# Follow logs
 docker compose logs -f
+
+# Stop containers
+docker compose -f docker-compose.yaml -f docker-compose-api.yaml -f docker-compose-storage.yaml down
 ```
 
-Stop services:
+### Step 4: Run Tests
 
 ```bash
-docker compose down
+# Run CLI unit tests (no running containers required)
+PYTHONPATH=. python3 test/test_cli.py
+
+# Run integration tests (requires stack running on http://localhost:8000)
+python3 -m unittest discover -s test -p "test_*.py" -v
 ```
 
 ---
 
-## Endpoints
+## Endpoints & Routing
 
-| Route        | Service    | Description                     | JWT Required |
-|--------------|------------|---------------------------------|--------------|
-| `/auth/*`    | GoTrue     | Authentication endpoints        | No           |
-| `/api/*`     | API        | Application backend             | Yes          |
-| `/storage/*` | Storage    | Object storage                  | Yes          |
+All traffic enters through Kong on `http://localhost:8000` (and port `80`/`443`):
 
----
-
-### Authentication API
-
-#### Signup
-
-**POST /signup**
-
-```json
-{
-  "email": "email@example.com",
-  "password": "secret"
-}
-```
-
-#### Login / Token
-
-**POST /token**
-
-```
-grant_type=password&username=email@example.com&password=secret
-```
-
-#### Logout
-
-**POST /logout**
-
-- Requires authentication
-- Revokes refresh tokens
-- Invalidates active JWTs
-
----
-
-## Configuration
-
-- Kong configuration: `config/kong.yaml`
-- JWT validation:
-  - Expiration enforced
-  - `iss` and `aud` optional in development
-- Rate limiting applied per service
-- GoTrue configuration via environment variables
-- Backend service swapped via Docker image
-
----
-
-## Roadmap
-
-- Realtime events (Postgres logical replication)
-- Admin dashboard
-- Multi-tenant support
-- GraphQL gateway (optional)
+| Route        | Target Service | Description                     | JWT Required |
+|--------------|----------------|---------------------------------|--------------|
+| `/`          | `dashboard`    | Frontend dashboard              | No           |
+| `/auth/*`    | `gotrue`       | Authentication endpoints        | No           |
+| `/api/*`     | `api`          | Your pluggable backend (`:8000`)| Yes          |
+| `/storage/*` | `storage`      | Object storage API              | Yes          |
+| `/graphql`   | `hasura`       | Hasura GraphQL endpoint         | Role-based   |
 
 ---
 

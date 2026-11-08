@@ -8,14 +8,19 @@ x-kong-config: &kong-env
 services:
 
   kong-cp:
-    image: kong/kong-gateway:3.12.0.0
+    image: ghcr.io/ognastack/gateway:main
+    build:
+      context: ./kong
     container_name: kong-cp
     restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
     networks:
       - api
       - tokens
     environment:
       KONG_PLUGINS: bundled,cors,acme,jwt-blacklist
+      KONG_HEADERS: "off"
       KONG_LUA_SSL_TRUSTED_CERTIFICATE: system
       KONG_NGINX_HTTP_LUA_SHARED_DICT: acme_storage 10m
       KONG_PROXY_ACCESS_LOG: /dev/stdout
@@ -26,28 +31,42 @@ services:
       KONG_DATABASE: "off"
       KONG_DECLARATIVE_CONFIG: /kong/kong.yaml
       GOTRUE_JWT_SECRET: ${GOTRUE_JWT_SECRET}
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+      OGNA_EXTRA_ROUTES: ${OGNA_EXTRA_ROUTES:-}
       KONG_PROXY_LISTEN: 0.0.0.0:8000, 0.0.0.0:8443 ssl
     ports:
-        - "80:8000"
-        - "443:8443"
-        - "8000:8000"
+      - "80:8000"
+      - "443:8443"
+      - "8000:8000"
     healthcheck:
       test: ["CMD", "kong", "health"]
       interval: 10s
       timeout: 10s
       retries: 10
       start_period: 30s # Give Kong time to start
-    volumes:
-      - ./kong/kong.yaml:/kong/kong.yaml:ro,z
-      - ./kong/plugins/jwt-blacklist:/usr/local/share/lua/5.1/kong/plugins/jwt-blacklist
     env_file:
       - .env
-    secrets:
-      - redis_password
+
+  db-init:
+    image: ghcr.io/ognastack/migrations:main
+    build:
+      context: ./migrations
+    container_name: db-init
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    command: init
+    restart: on-failure
+    networks:
+      - database
 
   gotrue:
     image: bitnamilegacy/gotrue:2.178.0
     platform: linux/amd64
+    security_opt:
+      - no-new-privileges:true
     environment:
       GOTRUE_DISABLE_SIGNUP: false
       GOTRUE_MAILER_AUTOCONFIRM: true
@@ -64,6 +83,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      db-init:
+        condition: service_completed_successfully
     networks:
       - api
       - tokens
@@ -78,9 +99,10 @@ services:
 
   postgres:
     image: postgres:18.1-alpine
+    security_opt:
+      - no-new-privileges:true
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./migrations/init:/docker-entrypoint-initdb.d
     expose:
       - "5432"
     networks:
@@ -100,15 +122,15 @@ services:
       - .env
 
   migrations:
-    image: ghcr.io/amacneil/dbmate:main
+    image: ghcr.io/ognastack/migrations:main
+    build:
+      context: ./migrations
     container_name: migrations
     environment:
       DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?sslmode=disable
       DBMATE_MIGRATIONS_TABLE: migrations.schema_migrations
       DBMATE_MIGRATIONS_DIR: "/db/migrations"
-      DBMATE_NO_DUMP_SCHEMA: false
-    volumes:
-      - ./migrations/post:/db/migrations
+      DBMATE_NO_DUMP_SCHEMA: "true"
     depends_on:
       postgres:
         condition: service_healthy
@@ -122,29 +144,35 @@ services:
   redis:
     image: redis:7-alpine
     container_name: redis
+    security_opt:
+      - no-new-privileges:true
     expose:
       - "6379"
     volumes:
       - redis_data:/data
-      - ./redis/redis.conf:/etc/redis/redis.conf  # Mount to default path
-      - ./logs:/var/log/redis
-    command: sh -c 'redis-server /etc/redis/redis.conf --requirepass "$$(cat /run/secrets/redis_password)"'
+    command:
+      - sh
+      - -c
+      - 'redis-server --requirepass "$$REDIS_PASSWORD" --timeout 300 --save 900 1 --save 300 10 --save 60 10000'
     networks:
       - tokens
     restart: unless-stopped
     healthcheck:
-      test: [ "CMD", "sh", "-c", "redis-cli ping | grep PONG" ]
+      test: ["CMD", "sh", "-c", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep PONG"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 10s
     environment:
       REDIS_REPLICATION_ROLE: master
-    secrets:
-      - redis_password
+      REDIS_PASSWORD: ${REDIS_PASSWORD}
+    env_file:
+      - .env
 
   storage:
-    image: ghcr.io/ognastack/storage:main
+    image: ghcr.io/ognastack/storage:latest
+    security_opt:
+      - no-new-privileges:true
     environment:
       S3_SECRET_KEY: ${S3_SECRET_KEY}
       S3_ENDPOINT_URL: ${S3_ENDPOINT_URL}
@@ -166,6 +194,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      hasura:
+        condition: service_started
     networks:
       - storage
       - gql
@@ -174,7 +204,9 @@ services:
       - .env
 
   dashboard:
-    image: ghcr.io/ognastack/ogna-fe-template:main
+    image: ghcr.io/ognastack/ogna-fe-template:latest
+    security_opt:
+      - no-new-privileges:true
     expose:
       - "3000"
     depends_on:
@@ -186,27 +218,30 @@ services:
       - .env
 
   hasura:
-    # 1. ADDED .cli-migrations-v3 suffix
-    image: hasura/graphql-engine:v2.40.0.cli-migrations-v3
+    image: ghcr.io/ognastack/hasura:main
+    build:
+      context: ./hasura-config
     container_name: hasura
+    security_opt:
+      - no-new-privileges:true
     expose:
       - "8080"
+    ports:
+      - "127.0.0.1:${HASURA_CONSOLE_PORT:-8080}:8080"
     networks:
       - gql
       - database
-    volumes:
-      - ./hasura-config/metadata:/hasura-metadata
     environment:
       HASURA_GRAPHQL_DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       HASURA_GRAPHQL_ADMIN_SECRET: ${HASURA_GRAPHQL_ADMIN_SECRET}
-      HASURA_GRAPHQL_ENABLE_CONSOLE: "true"
+      HASURA_GRAPHQL_ENABLE_CONSOLE: ${HASURA_GRAPHQL_ENABLE_CONSOLE:-false}
       HASURA_GRAPHQL_UNAUTHORIZED_ROLE: anonymous
-      HASURA_GRAPHQL_DEV_MODE: "true"
-      HASURA_GRAPHQL_METADATA_DIR: /hasura-metadata
+      HASURA_GRAPHQL_DEV_MODE: ${HASURA_GRAPHQL_DEV_MODE:-false}
+      HASURA_GRAPHQL_METADATA_DIR: /tmp/hasura-metadata
       HASURA_GRAPHQL_JWT_SECRET: >
         {
           "type": "HS256",
-          "key": "vPDsBi2TafJuP4iqp40qx60AR34Qf6hQgC8GWBB7GoOKGqL9V6",
+          "key": "${GOTRUE_JWT_SECRET}",
           "claims_map": {
             "x-hasura-user-id": { "path": "$.sub" },
             "x-hasura-default-role": { "path": "$.role" },
@@ -241,7 +276,3 @@ networks:
     driver: bridge
   api:
     driver: bridge
-
-secrets:
-  redis_password:
-    file: secrets/redis_password.txt
