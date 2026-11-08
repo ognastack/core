@@ -13,7 +13,7 @@ OGNA is different by design:
 
 - **Swap your backend container anytime** — Your backend is just a Docker image (`API_IMAGE`) exposing port `8000` internally.
 - **Any language or framework** — Use Go, Rust, Python, Node.js, Java, C#, or anything that runs in a container.
-- **Zero auth boilerplate in your backend** — Kong validates JWTs, checks Redis for revoked tokens, and enforces rate limits before requests ever reach `/api/*`.
+- **Zero auth boilerplate in your backend** — Kong validates JWTs, forwards the verified user as `X-Authenticated-User-Id` / `X-Authenticated-User-Role` headers, and enforces rate limits before requests ever reach `/api/*`.
 
 ---
 
@@ -22,7 +22,7 @@ OGNA is different by design:
 - **Database** — PostgreSQL 18.1
 - **Authentication** — GoTrue (email/password, OAuth, JWT)
 - **Storage** — S3-compatible object storage (`ghcr.io/ognastack/storage:latest` + local RustFS or external S3)
-- **API Gateway** — Kong (`ghcr.io/ognastack/gateway`) for routing, JWT validation, Redis token blacklisting, and rate limiting
+- **API Gateway** — Kong (`ghcr.io/ognastack/gateway`) for routing, JWT validation, and rate limiting
 - **GraphQL Engine** — Hasura (`ghcr.io/ognastack/hasura`) pre-configured with storage metadata & JWT claims
 - **Database Migrations** — Automated core + user SQL migrations (`ghcr.io/ognastack/migrations` powered by `dbmate`)
 - **Pluggable Backend** — Bring your own backend Docker image (`API_IMAGE`)
@@ -37,7 +37,7 @@ OGNA separates **core infrastructure** from **your application container & migra
    - Defined in `docker-compose.yaml` (or `docker-compose-api.yaml` in `core`) using `image: ${API_IMAGE:-ogna-py-appi:prod}`.
    - You can swap the backend container at any time via `ogna set-api <image>`, `ogna up --api-image <image>`, or by changing `API_IMAGE` in `.env`.
 2. **Self-Contained Core Images (No Submodule Needed)**:
-   - **Gateway (`ghcr.io/ognastack/gateway`)**: Packages Kong Gateway, the `jwt-blacklist` Lua plugin, and `kong.yaml`, dynamically injecting `GOTRUE_JWT_SECRET` and `REDIS_PASSWORD` from `.env`.
+   - **Gateway (`ghcr.io/ognastack/gateway`)**: Packages Kong Gateway, the `ogna-guard` Lua plugin (strips spoofable internal headers, forwards verified user claims, adds security headers), and `kong.yaml`, dynamically injecting `GOTRUE_JWT_SECRET` from `.env`.
    - **Migrations (`ghcr.io/ognastack/migrations`)**: Pre-initializes `auth` and `migrations` schemas (`db-init`), automatically runs OGNA's internal migrations, and then applies **your project's SQL migrations** from `./migrations`.
    - **Hasura (`ghcr.io/ognastack/hasura`)**: Packages Hasura GraphQL Engine with OGNA's storage permissions and metadata pre-loaded.
 
@@ -121,7 +121,7 @@ When `--route` is provided, `ogna` appends the service to `docker-compose.yaml` 
 
 #### Option B: Manually in `docker-compose.yaml`
 
-Your project's `docker-compose.yaml` is standard Docker Compose merged with OGNA Core. You can add any service directly and attach it to OGNA's internal networks (`api`, `database`, `gql`, `storage`, `tokens`):
+Your project's `docker-compose.yaml` is standard Docker Compose merged with OGNA Core. You can add any service directly and attach it to OGNA's internal networks (`api`, `database`, `gql`, `storage`):
 
 ```yaml
 services:
@@ -249,7 +249,7 @@ Set `API_IMAGE` (and any other credentials) in `.env`:
 | `POSTGRES_DB` | Database name | `ogna_db` |
 | `GOTRUE_JWT_SECRET` | Shared JWT secret (GoTrue, Kong, Storage, Hasura) | `vPDsBi2TafJuP4iqp40qx60AR34Qf6hQgC8GWBB7GoOKGqL9V6` |
 | `ENCRYPTION_KEY` | GoTrue encryption key | `vPDsBi2TafJuP4iqp40qx60AR34Qf6hQgC8GWBB7GoOKGqL9V6` |
-| `REDIS_PASSWORD` | Redis password (used by Redis & Kong `jwt-blacklist`) | `averylongandsecurepassword` |
+| `GOTRUE_JWT_EXP` | Access token lifetime in seconds (see [Sessions & Logout](#sessions--logout)) | `600` |
 | `HASURA_GRAPHQL_ADMIN_SECRET` | Hasura admin secret | `a_very_secure_password` |
 | `STORAGE_TYPE` | Storage backend type | `S3` |
 | `S3_ENDPOINT_URL` | S3 endpoint URL | `http://rustfs:9000` |
@@ -334,6 +334,25 @@ All traffic enters through Kong on `http://localhost:8000` (and port `80`/`443`)
 | `/api/*`     | `api`          | Your pluggable backend (`:8000`)| Yes          |
 | `/storage/*` | `storage`      | Object storage API              | Yes          |
 | `/graphql`   | `hasura`       | Hasura GraphQL endpoint         | Role-based   |
+
+---
+
+## Sessions & Logout
+
+OGNA uses the same model as Supabase: short-lived access tokens plus revocable refresh tokens, with no token blocklist.
+
+- GoTrue issues access tokens (JWTs) that expire after `GOTRUE_JWT_EXP` seconds (default `600`, i.e. 10 minutes). Clients refresh them with `POST /auth/token?grant_type=refresh_token`.
+- Refresh tokens are stored in Postgres. `POST /auth/logout` revokes them immediately, so a logged-out client cannot obtain new access tokens.
+- An access token issued before logout keeps working until it expires. Lower `GOTRUE_JWT_EXP` to shrink that window. For operations that must reject logged-out users instantly, check that the token's `session_id` claim still exists in `auth.sessions`.
+
+### Upgrading from versions that used Redis
+
+Earlier versions ran Redis and a `jwt-blacklist` Kong plugin to revoke access tokens on logout. Both are gone:
+
+1. Pull the new gateway image (`ghcr.io/ognastack/gateway:main`) and restart the stack.
+2. Remove `REDIS_PASSWORD` from `.env` and add `GOTRUE_JWT_EXP=600` (optional; `600` is the default).
+3. Delete the old container and volume: `docker rm -f redis && docker volume rm <project>_redis_data`.
+4. If your own services were attached to the `tokens` network, remove it from their `networks:` list.
 
 ---
 

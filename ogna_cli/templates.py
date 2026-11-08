@@ -9,9 +9,8 @@ CORE_COMPOSE_YAML = """services:
       - no-new-privileges:true
     networks:
       - api
-      - tokens
     environment:
-      KONG_PLUGINS: bundled,cors,acme,jwt-blacklist
+      KONG_PLUGINS: bundled,cors,acme,ogna-guard
       KONG_HEADERS: "off"
       KONG_LUA_SSL_TRUSTED_CERTIFICATE: system
       KONG_NGINX_HTTP_LUA_SHARED_DICT: acme_storage 10m
@@ -23,7 +22,6 @@ CORE_COMPOSE_YAML = """services:
       KONG_DATABASE: "off"
       KONG_DECLARATIVE_CONFIG: /kong/kong.yaml
       GOTRUE_JWT_SECRET: ${GOTRUE_JWT_SECRET}
-      REDIS_PASSWORD: ${REDIS_PASSWORD}
       OGNA_EXTRA_ROUTES: ${OGNA_EXTRA_ROUTES:-}
       KONG_PROXY_LISTEN: 0.0.0.0:8000, 0.0.0.0:8443 ssl
     ports:
@@ -61,6 +59,7 @@ CORE_COMPOSE_YAML = """services:
       GOTRUE_API_PORT: 9999
       GOTRUE_DB_DRIVER: "postgres"
       GOTRUE_JWT_AUD: "authenticated"
+      GOTRUE_JWT_EXP: ${GOTRUE_JWT_EXP:-600}
       GOTRUE_JWT_DEFAULT_GROUP_NAME: "authenticated"
       GOTRUE_JWT_SECRET: ${GOTRUE_JWT_SECRET}
       GOTRUE_SITE_URL: ${GOTRUE_SITE_URL:-http://localhost}
@@ -74,7 +73,6 @@ CORE_COMPOSE_YAML = """services:
         condition: service_completed_successfully
     networks:
       - api
-      - tokens
       - database
     healthcheck:
       test: ["CMD-SHELL", "ps | grep '[g]otrue'"]
@@ -124,29 +122,6 @@ CORE_COMPOSE_YAML = """services:
     networks:
       - database
 
-  redis:
-    image: redis:7-alpine
-    container_name: redis
-    expose:
-      - "6379"
-    volumes:
-      - redis_data:/data
-    command:
-      - sh
-      - -c
-      - 'redis-server --requirepass "$$REDIS_PASSWORD" --timeout 300 --save 900 1 --save 300 10 --save 60 10000'
-    networks:
-      - tokens
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "sh", "-c", "redis-cli -a \\"$$REDIS_PASSWORD\\" ping | grep PONG"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 10s
-    environment:
-      REDIS_REPLICATION_ROLE: master
-      REDIS_PASSWORD: ${REDIS_PASSWORD}
 
   storage:
     image: ghcr.io/ognastack/storage:latest
@@ -224,14 +199,10 @@ CORE_COMPOSE_YAML = """services:
 volumes:
   postgres_data:
     driver: local
-  redis_data:
-    driver: local
   temp_files:
     driver: local
 
 networks:
-  tokens:
-    driver: bridge
   storage:
     driver: bridge
   database:
@@ -330,7 +301,7 @@ STORAGE_TYPE="S3"
 S3_SECRET_KEY={s3_secret}
 S3_ENDPOINT_URL=http://rustfs:9000
 S3_ACCESS_KEY=rustfsadmin
-REDIS_PASSWORD={redis_password}
+GOTRUE_JWT_EXP=600
 HASURA_GRAPHQL_ADMIN_SECRET={hasura_secret}
 """
 

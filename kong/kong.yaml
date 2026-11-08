@@ -155,13 +155,8 @@ plugins:
       credentials: true
 
   ##################################
-  # JWT BLACKLIST & SECURITY GUARD
+  # SECURITY GUARD (header stripping, claim forwarding, security headers)
   ##################################
-  - name: jwt-blacklist
+  - name: ogna-guard
     config:
-      redis_host: redis
-      redis_port: 6379
-      redis_password: ${REDIS_PASSWORD}
       jwt_secret: ${GOTRUE_JWT_SECRET}
-      max_ttl: 86400
-      fail_open: false

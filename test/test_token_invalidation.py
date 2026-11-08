@@ -1,126 +1,89 @@
-import unittest
-import requests
+import base64
 import json
+import os
+import unittest
 import uuid
+
+import requests
+
+
+def _jwt_claims(token):
+    payload = token.split(".")[1]
+    payload += "=" * (-len(payload) % 4)
+    return json.loads(base64.urlsafe_b64decode(payload))
 
 
 class TestLogoutTokenInvalidation(unittest.TestCase):
+    """Logout revokes refresh tokens; access tokens are short-lived (GOTRUE_JWT_EXP)."""
 
     def setUp(self):
-        """Set up test fixtures before each test method"""
         self.base_url = "http://localhost:8000"
         self.signup_url = f"{self.base_url}/auth/signup"
         self.logout_url = f"{self.base_url}/auth/logout"
-        self.sign_in = f"{self.base_url}/auth/token?grant_type=password"
-
+        self.sign_in_url = f"{self.base_url}/auth/token?grant_type=password"
+        self.refresh_url = f"{self.base_url}/auth/token?grant_type=refresh_token"
         self.health = f"{self.base_url}/api/v1/health/"
+        self.headers = {"Content-Type": "application/json"}
 
-        self.check = f"{self.base_url}/api/v1/check/"
-        self.headers = {
-            "Content-Type": "application/json"
-        }
+        email = f"{uuid.uuid4()}@example.com"
+        self.payload = {"email": email, "password": "strongpassword"}
 
-        email = f"{str(uuid.uuid4())}@example.com"
-        self.payload = {
-            "email": email,
-            "password": "strongpassword"
-        }
+        response = requests.post(self.signup_url, headers=self.headers, json=self.payload)
+        self.assertEqual(200, response.status_code)
+        self.assertEqual(response.json()["user"]["email"], email)
 
-        response = requests.post(
-            self.signup_url,
-            headers=self.headers,
-            data=json.dumps(self.payload)
-        )
+    def _sign_in(self):
+        response = requests.post(self.sign_in_url, headers=self.headers, json=self.payload)
+        self.assertEqual(200, response.status_code)
+        body = response.json()
+        self.assertIn("access_token", body)
+        self.assertIn("refresh_token", body)
+        return body["access_token"], body["refresh_token"]
 
-        # Assert successful response
-        self.assertEqual(200, response.status_code)  # Or 200 depending on your API
-
-        # Check response content (adjust based on your API response)
-        response_data = response.json()
-
-        self.assertIn("user", response_data)
-        response_use = response_data['user']
-        self.assertIn("email", response_use)
-        self.assertEqual(response_use["email"], email)
-
-        response_sign_in = requests.post(self.sign_in, headers=self.headers, json=self.payload)
-
-        self.assertIn("access_token", response_sign_in.json())
-
-        access_token = response_sign_in.json()["access_token"]
-
-        # Create session
-        self.session = requests.session()
-
-        # Set headers including authorization
-        self.session.headers.update({
-            'Authorization': f'Bearer {access_token}',
-            'Content-Type': 'application/json'
+    def _authed(self, access_token):
+        session = requests.session()
+        session.headers.update({
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json",
         })
+        return session
 
-    def test_succesful_auth_call(self):
-        """Test successful user signup"""
+    def test_access_token_is_short_lived(self):
+        access_token, _ = self._sign_in()
+        claims = _jwt_claims(access_token)
+        max_exp = int(os.environ.get("GOTRUE_JWT_EXP", "600"))
+        self.assertLessEqual(claims["exp"] - claims["iat"], max_exp)
 
-        result = self.session.get(url=self.health)
-        self.assertEqual(result.status_code, 200)
+    def test_logout_revokes_refresh_token(self):
+        access_token, refresh_token = self._sign_in()
+        session = self._authed(access_token)
 
-        result = self.session.get(url=self.health)
-        self.assertEqual(result.status_code, 200)
+        self.assertEqual(session.get(self.health).status_code, 200)
 
-        result = self.session.get(url=self.health)
-        self.assertEqual(result.status_code, 200)
+        # Refresh works while logged in (and rotates the refresh token)
+        refreshed = requests.post(self.refresh_url, headers=self.headers,
+                                  json={"refresh_token": refresh_token})
+        self.assertEqual(refreshed.status_code, 200)
+        access_token = refreshed.json()["access_token"]
+        refresh_token = refreshed.json()["refresh_token"]
+        session = self._authed(access_token)
 
-        logout = self.session.post(url=self.logout_url)
-
+        logout = session.post(self.logout_url)
         self.assertEqual(logout.status_code, 204)
 
-        new_result = self.session.get(url=self.health)
-        self.assertEqual(new_result.status_code, 401)
+        # After logout the refresh token can no longer mint new access tokens
+        after = requests.post(self.refresh_url, headers=self.headers,
+                              json={"refresh_token": refresh_token})
+        self.assertIn(after.status_code, (400, 401))
+        self.assertNotIn("access_token", after.json())
 
-        new_result2 = self.session.get(url=self.health)
-        self.assertEqual(new_result2.status_code, 401)
-
-        response_sign_in = requests.post(self.sign_in, headers=self.headers, json=self.payload)
-
-        self.assertIn("access_token", response_sign_in.json())
-
-        access_token = response_sign_in.json()["access_token"]
-
-        # Create session
-        self.session = requests.session()
-
-        # Set headers including authorization
-        self.session.headers.update({
-            'Authorization': f'Bearer {access_token}',
-            'Content-Type': 'application/json'
-        })
-
-        new_result3 = self.session.get(url=self.health)
-        self.assertEqual(new_result3.status_code, 200)
-
-        logout = self.session.post(url=self.logout_url)
-
-        self.assertEqual(logout.status_code, 204)
-
-        new_result = self.session.get(url=self.health)
-        self.assertEqual(new_result.status_code, 401)
+        # Signing in again starts a fresh, working session
+        new_access, _ = self._sign_in()
+        self.assertEqual(self._authed(new_access).get(self.health).status_code, 200)
 
     def test_no_login_call(self):
-        """Test successful user signup"""
-
-        result = requests.get(url=self.health)
-        self.assertEqual(result.status_code, 401)
-
-    def tearDown(self):
-        """Clean up after each test"""
-        # Add any cleanup code here if needed
-        # For example, delete test users from database
-        pass
+        self.assertEqual(requests.get(self.health).status_code, 401)
 
 
-if __name__ == '__main__':
-    # Run with more verbose output
+if __name__ == "__main__":
     unittest.main(verbosity=2)
-
-    # Alternative: Run specific test
-    # unittest.main(defaultTest='TestSignupAPI.test_successful_signup')

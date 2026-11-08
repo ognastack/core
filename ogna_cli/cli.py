@@ -123,7 +123,6 @@ def cmd_init(args: argparse.Namespace) -> int:
         jwt_secret=_generate_secret(50),
         api_image=api_image,
         s3_secret=_generate_secret(32),
-        redis_password=_generate_secret(40),
         hasura_secret=_generate_secret(40),
     )
     env_example_content = ENV_TEMPLATE.format(
@@ -133,7 +132,6 @@ def cmd_init(args: argparse.Namespace) -> int:
         jwt_secret="change_me_50_char_gotrue_jwt_secret_000000000000000",
         api_image=api_image,
         s3_secret="rustfsadmin",
-        redis_password="change_me_redis_password",
         hasura_secret="change_me_hasura_admin_secret",
     )
 
@@ -541,7 +539,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     # ogna down
     p_down = subparsers.add_parser("down", help="Stop the OGNA stack")
-    p_down.add_argument("-v", "--volumes", action="store_true", help="Remove named volumes (wipes local DB/Redis data)")
+    p_down.add_argument("-v", "--volumes", action="store_true", help="Remove named volumes (wipes local DB data)")
     p_down.add_argument("-C", "--project-dir", default=".", help="Project directory")
     p_down.set_defaults(func=cmd_down)
 

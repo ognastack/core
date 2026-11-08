@@ -31,7 +31,7 @@ build: env ## Build local core images (gateway, migrations, hasura)
 down: ## Stop all running services
 	$(COMPOSE_FULL) down --remove-orphans
 
-clean: ## Stop all services and delete volumes (wipes DB & Redis data)
+clean: ## Stop all services and delete volumes (wipes DB data)
 	$(COMPOSE_FULL) down -v --remove-orphans
 
 restart: ## Restart all services
