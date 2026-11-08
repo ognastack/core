@@ -158,8 +158,8 @@ CORE_COMPOSE_YAML = """services:
       OGNA_AUTH_EXTERNAL_PORT: ${OGNA_AUTH_EXTERNAL_PORT:-8000}
       OGNA_AUTH_EXTERNAL_SECURE: ${OGNA_AUTH_EXTERNAL_SECURE:-false}
       OGNA_AUTH_PROJECT_NAME: ${OGNA_AUTH_PROJECT_NAME:-OGNA}
-      OGNA_OIDC_REDIRECT_URIS: ${OGNA_OIDC_REDIRECT_URIS:-http://localhost:3000/callback,http://localhost:5173/callback}
-      OGNA_OIDC_POST_LOGOUT_URIS: ${OGNA_OIDC_POST_LOGOUT_URIS:-http://localhost:3000/,http://localhost:5173/}
+      OGNA_OIDC_REDIRECT_URIS: ${OGNA_OIDC_REDIRECT_URIS:-http://localhost:8000/auth/callback,http://localhost:3000/auth/callback,http://localhost:5173/auth/callback}
+      OGNA_OIDC_POST_LOGOUT_URIS: ${OGNA_OIDC_POST_LOGOUT_URIS:-http://localhost:8000/,http://localhost:3000/,http://localhost:5173/}
     volumes:
       - zitadel_bootstrap:/zitadel/bootstrap:rw
     networks:
@@ -407,8 +407,8 @@ ZITADEL_LOGIN_COOKIE_SECRET={zitadel_cookie_secret}
 # Signs the short-lived tokens the gateway forwards to Hasura, Storage and your API.
 OGNA_INTERNAL_JWT_SECRET={internal_jwt_secret}
 # OIDC app "ogna-web" (created by zitadel-setup): where your frontends redirect after login/logout
-OGNA_OIDC_REDIRECT_URIS=http://localhost:3000/callback,http://localhost:5173/callback
-OGNA_OIDC_POST_LOGOUT_URIS=http://localhost:3000/,http://localhost:5173/
+OGNA_OIDC_REDIRECT_URIS=http://localhost:8000/auth/callback,http://localhost:3000/auth/callback,http://localhost:5173/auth/callback
+OGNA_OIDC_POST_LOGOUT_URIS=http://localhost:8000/,http://localhost:3000/,http://localhost:5173/
 # Per-IP limit on Zitadel's token endpoint. Raise for the integration test suite.
 OGNA_AUTH_RATE_LIMIT_MINUTE=10
 OGNA_AUTH_RATE_LIMIT_HOUR=100

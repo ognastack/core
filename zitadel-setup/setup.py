@@ -187,8 +187,8 @@ def ensure_gateway_app(z, project_id):
 
 
 def ensure_web_app(z, project_id):
-    redirect_uris = csv_env("OGNA_OIDC_REDIRECT_URIS", "http://localhost:3000/callback,http://localhost:5173/callback")
-    logout_uris = csv_env("OGNA_OIDC_POST_LOGOUT_URIS", "http://localhost:3000/,http://localhost:5173/")
+    redirect_uris = csv_env("OGNA_OIDC_REDIRECT_URIS", "http://localhost:8000/auth/callback,http://localhost:3000/auth/callback,http://localhost:5173/auth/callback")
+    logout_uris = csv_env("OGNA_OIDC_POST_LOGOUT_URIS", "http://localhost:8000/,http://localhost:3000/,http://localhost:5173/")
     dev_mode = any(u.startswith("http://") for u in redirect_uris + logout_uris)
     config = {
         "redirectUris": redirect_uris,
