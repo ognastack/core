@@ -1,8 +1,10 @@
 services:
   api:
-    image: ogna-py-appi:prod
+    image: ${API_IMAGE:-ogna-py-appi:prod}
     container_name: api
-    restart: unless-stopped # Add restart policy
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
     depends_on:
       - postgres
       - kong-cp
