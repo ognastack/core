@@ -1,142 +1,223 @@
-local jwt_parser = require "kong.plugins.jwt.jwt_parser"
-local pgmoon = require "pgmoon"
+local cjson = require "cjson.safe"
+local http = require "resty.http"
+local digest = require "resty.openssl.digest"
+local hmac = require "resty.openssl.hmac"
+local to_hex = require("resty.string").to_hex
 
--- OGNA security guard.
---   * strips internal headers that clients must never be able to spoof,
---   * verifies bearer tokens and rejects tokens whose GoTrue session has ended
---     (logout, "log out everywhere", deleted user, session timeout),
---   * forwards verified user claims to upstreams as X-Authenticated-User-* headers,
---   * adds baseline security response headers.
+-- OGNA gateway guard (Zitadel edition).
 --
--- Revocation source of truth is GoTrue's own `auth.sessions` table: GoTrue deletes
--- the row on logout, so every access token carrying that `session_id` stops working.
--- Results are cached in Kong's shared cache so Postgres sees at most one lookup per
--- session every `session_cache_ttl` seconds.
+-- For every request to an OGNA service it:
+--   1. strips headers clients must never be able to set (admin secret, identity headers),
+--   2. checks the bearer token with Zitadel's introspection endpoint (RFC 7662),
+--      caching "active" answers for a few seconds and "inactive" answers longer,
+--   3. on success forwards the identity as X-Authenticated-User-* headers and replaces
+--      Authorization with a short-lived internal HS256 JWT (sub, role, aud) that Hasura,
+--      Storage and backends verify with OGNA_INTERNAL_JWT_SECRET, so they never need
+--      to know about Zitadel,
+--   4. rejects the request (401) when `require_auth` is set and there is no valid token.
+--
+-- Revocation (logout, deleted user, revoked PAT) takes effect within
+-- `active_cache_ttl` seconds because Zitadel reports the token as inactive.
+--
+-- Shared settings (introspection credentials, internal secret) are read once per
+-- worker from the JSON file rendered by the container entrypoint, so secrets never
+-- live in kong.yaml.
 local OgnaGuardHandler = {
-  VERSION = "3.0.0",
+  VERSION = "4.0.0",
   PRIORITY = 900,
 }
 
-local UUID_PATTERN = "^%x%x%x%x%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%-%x%x%x%x%x%x%x%x%x%x%x%x$"
+local SETTINGS_PATH = os.getenv("OGNA_GUARD_SETTINGS") or "/tmp/ogna-guard.json"
+local settings
 
-local function is_placeholder(value)
-  return value == nil or value == "" or value:find("^%${") ~= nil
+local function load_settings()
+  if settings then return settings end
+  local f, err = io.open(SETTINGS_PATH, "r")
+  if not f then
+    return nil, "cannot open " .. SETTINGS_PATH .. ": " .. tostring(err)
+  end
+  local raw = f:read("*a")
+  f:close()
+  local decoded, derr = cjson.decode(raw)
+  if not decoded then
+    return nil, "invalid settings JSON: " .. tostring(derr)
+  end
+  settings = decoded
+  return settings
 end
 
-local function get_jwt_secret(conf)
-  if conf and not is_placeholder(conf.jwt_secret) then
-    return conf.jwt_secret
-  end
-  local env_secret = os.getenv("GOTRUE_JWT_SECRET")
-  if env_secret and env_secret ~= "" then
-    return env_secret
-  end
-  return nil
+local function b64url(data)
+  return (ngx.encode_base64(data):gsub("%+", "-"):gsub("/", "_"):gsub("=", ""))
 end
 
--- Returns true if the session is active, nil if it no longer exists, or nil + err on failure.
--- Returning nil (without err) lets kong.cache store it as a negative entry.
-local function load_session(conf, session_id)
-  local pg = pgmoon.new({
-    host = conf.db_host,
-    port = conf.db_port,
-    database = conf.db_name,
-    user = conf.db_user,
-    password = conf.db_password,
+local function sign_internal_jwt(s, claims)
+  local header = b64url(cjson.encode({ alg = "HS256", typ = "JWT" }))
+  local payload = b64url(cjson.encode(claims))
+  local signing_input = header .. "." .. payload
+  local mac, err = hmac.new(s.internal_jwt_secret, "sha256")
+  if not mac then return nil, err end
+  local sig, serr = mac:final(signing_input)
+  if not sig then return nil, serr end
+  return signing_input .. "." .. b64url(sig)
+end
+
+local function token_key(token)
+  local d = digest.new("sha256")
+  local h = d:final(token)
+  return "ogna-guard:token:" .. to_hex(h)
+end
+
+-- Returns claims table for an active token, nil for inactive, or nil + err on failure.
+-- The optional third return value overrides the cache TTL.
+local function introspect(s, token)
+  local client = http.new()
+  client:set_timeout(s.introspection_timeout_ms or 3000)
+  local res, err = client:request_uri(s.introspection_url, {
+    method = "POST",
+    body = "token=" .. ngx.escape_uri(token),
+    headers = {
+      ["Content-Type"] = "application/x-www-form-urlencoded",
+      ["Accept"] = "application/json",
+      ["Authorization"] = "Basic " .. ngx.encode_base64(s.client_id .. ":" .. s.client_secret),
+      -- Zitadel resolves the instance from the Host header
+      ["Host"] = s.auth_host,
+      ["X-Forwarded-Proto"] = s.auth_scheme,
+    },
+    keepalive_timeout = 60000,
+    keepalive_pool = 32,
   })
-  pg:settimeout(conf.db_timeout)
-
-  local ok, err = pg:connect()
-  if not ok then
-    return nil, "session store connect failed: " .. tostring(err)
-  end
-
-  local res, qerr = pg:query(
-    "SELECT 1 FROM auth.sessions WHERE id = " .. pg:escape_literal(session_id) ..
-    " AND (not_after IS NULL OR not_after > now()) LIMIT 1"
-  )
-  pg:keepalive(60000, 50)
-
   if not res then
-    return nil, "session lookup failed: " .. tostring(qerr)
+    return nil, "introspection request failed: " .. tostring(err)
   end
-  if type(res) == "table" and #res > 0 then
-    return true
+  if res.status ~= 200 then
+    return nil, "introspection returned HTTP " .. res.status
   end
-  return nil
+  local body = cjson.decode(res.body)
+  if type(body) ~= "table" then
+    return nil, "introspection returned invalid JSON"
+  end
+  if body.active ~= true or not body.sub then
+    return nil
+  end
+
+  local ttl = s.active_cache_ttl or 5
+  local exp = tonumber(body.exp)
+  if exp then
+    local remaining = exp - ngx.time()
+    if remaining <= 0 then return nil end
+    if remaining < ttl then ttl = remaining end
+  end
+  return body, nil, ttl
 end
 
-local function session_is_active(conf, session_id)
-  local cache_key = "ogna-guard:session:" .. session_id
-  local active, err = kong.cache:get(cache_key, {
-    ttl = conf.session_cache_ttl,
-    neg_ttl = conf.revoked_cache_ttl,
-  }, load_session, conf, session_id)
-  return active, err
+local function check_token(s, token)
+  return kong.cache:get(token_key(token), {
+    ttl = s.active_cache_ttl or 5,
+    neg_ttl = s.inactive_cache_ttl or 300,
+  }, introspect, s, token)
+end
+
+local function project_roles(claims)
+  local roles = claims["urn:zitadel:iam:org:project:roles"]
+  if type(roles) ~= "table" then return nil end
+  local names = {}
+  for name in pairs(roles) do
+    names[#names + 1] = name
+  end
+  table.sort(names)
+  return names
+end
+
+local function reject(status, message)
+  if status == 401 then
+    kong.response.set_header("WWW-Authenticate", 'Bearer realm="ogna"')
+  end
+  return kong.response.exit(status, { message = message })
 end
 
 function OgnaGuardHandler:access(conf)
-  -- Strip sensitive internal headers to prevent client header spoofing
+  -- Never let clients set internal headers
   kong.service.request.clear_header("X-Hasura-Admin-Secret")
   kong.service.request.clear_header("X-Authenticated-User-Id")
   kong.service.request.clear_header("X-Authenticated-User-Role")
-
-  -- GoTrue validates its own sessions on /auth/*
-  if kong.request.get_path():match("^/auth/") then
-    return
-  end
+  kong.service.request.clear_header("X-Authenticated-User-Roles")
+  kong.service.request.clear_header("X-Authenticated-Org-Id")
+  kong.service.request.clear_header("X-Authenticated-Client-Id")
 
   local auth_header = kong.request.get_header("Authorization")
-  if not auth_header then return end
+  local token = auth_header and auth_header:match("^[Bb]earer%s+(%S+)%s*$")
 
-  local _, _, token = string.find(auth_header, "^Bearer%s+(.+)$")
-  if not token then return end
-
-  local jwt, err = jwt_parser:new(token)
-  if err or not jwt then
-    return kong.response.exit(401, { message = "Invalid JWT format" })
-  end
-
-  local secret = get_jwt_secret(conf)
-  if not secret then
-    kong.log.err("GOTRUE_JWT_SECRET not configured")
-    return kong.response.exit(503, { message = "Authentication verification unavailable" })
-  end
-  if not jwt:verify_signature(secret) then
-    return kong.response.exit(401, { message = "Invalid token signature" })
-  end
-
-  local claims = jwt.claims or {}
-  local exp = tonumber(claims.exp)
-  if exp and exp <= ngx.time() then
-    -- Protected routes are rejected by the jwt plugin; never forward stale identity
+  if not token then
+    -- Anything that is not a bearer token never reaches upstreams
+    kong.service.request.clear_header("Authorization")
+    if conf.require_auth then
+      return reject(401, "Missing bearer token")
+    end
     return
   end
 
-  -- Session check: tokens issued by GoTrue for a user always carry session_id.
-  -- Tokens without one (e.g. service keys minted with the JWT secret) skip this check.
-  local session_id = claims.session_id
-  if session_id ~= nil then
-    session_id = tostring(session_id)
-    if not session_id:match(UUID_PATTERN) then
-      return kong.response.exit(401, { message = "Invalid session" })
-    end
-
-    local active, serr = session_is_active(conf, session_id)
-    if serr then
-      kong.log.err("ogna-guard: ", serr)
-      return kong.response.exit(503, { message = "Authentication verification unavailable" })
-    end
-    if not active then
-      return kong.response.exit(401, { message = "Session has ended (logged out)" })
-    end
+  local s, serr = load_settings()
+  if not s then
+    kong.log.err("ogna-guard: ", serr)
+    return reject(503, "Authentication verification unavailable")
   end
 
-  if claims.sub then
-    kong.service.request.set_header("X-Authenticated-User-Id", tostring(claims.sub))
+  local claims, err = check_token(s, token)
+  if err then
+    kong.log.err("ogna-guard: ", err)
+    return reject(503, "Authentication verification unavailable")
   end
-  if claims.role then
-    kong.service.request.set_header("X-Authenticated-User-Role", tostring(claims.role))
+
+  local now = ngx.time()
+  if claims and tonumber(claims.exp) and tonumber(claims.exp) <= now then
+    claims = nil
+  end
+
+  if not claims then
+    kong.service.request.clear_header("Authorization")
+    if conf.require_auth then
+      return reject(401, "Invalid or expired token")
+    end
+    return
+  end
+
+  local internal_ttl = s.internal_jwt_ttl or 300
+  local internal_exp = now + internal_ttl
+  if tonumber(claims.exp) and tonumber(claims.exp) < internal_exp then
+    internal_exp = tonumber(claims.exp)
+  end
+
+  local roles = project_roles(claims)
+  local org_id = claims["urn:zitadel:iam:user:resourceowner:id"]
+
+  local internal, jerr = sign_internal_jwt(s, {
+    iss = "ogna-gateway",
+    aud = "authenticated",
+    sub = tostring(claims.sub),
+    role = "authenticated",
+    iat = now,
+    exp = internal_exp,
+    email = claims.email,
+    org_id = org_id,
+    roles = roles,
+    client_id = claims.client_id,
+  })
+  if not internal then
+    kong.log.err("ogna-guard: failed to sign internal token: ", jerr)
+    return reject(503, "Authentication verification unavailable")
+  end
+
+  kong.service.request.set_header("Authorization", "Bearer " .. internal)
+  kong.service.request.set_header("X-Authenticated-User-Id", tostring(claims.sub))
+  kong.service.request.set_header("X-Authenticated-User-Role", "authenticated")
+  if roles and #roles > 0 then
+    kong.service.request.set_header("X-Authenticated-User-Roles", table.concat(roles, ","))
+  end
+  if org_id then
+    kong.service.request.set_header("X-Authenticated-Org-Id", tostring(org_id))
+  end
+  if claims.client_id then
+    kong.service.request.set_header("X-Authenticated-Client-Id", tostring(claims.client_id))
   end
 end
 

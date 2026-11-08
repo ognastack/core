@@ -5,13 +5,9 @@ CREATE SCHEMA IF NOT EXISTS storage;
 CREATE TABLE storage.bucket (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     name TEXT NOT NULL,
-    owner UUID,
-
-    -- Adding the foreign key constraint
-    CONSTRAINT fk_owner
-        FOREIGN KEY (owner)
-        REFERENCES auth.users(id)
-        ON DELETE CASCADE
+    -- Identity-provider user id (Zitadel ids are strings, not UUIDs).
+    -- No foreign key: users live in the identity provider, not in this database.
+    owner TEXT
 );
 
 CREATE TABLE storage.object (

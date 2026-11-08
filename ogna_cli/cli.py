@@ -31,6 +31,11 @@ def _generate_secret(length: int = 48) -> str:
     return "".join(secrets.choice(alphabet) for _ in range(length))
 
 
+def _generate_password() -> str:
+    """Random password that satisfies Zitadel's default complexity policy."""
+    return _generate_secret(28) + "Aa1!"
+
+
 def _ensure_ogna_runtime_files(project_dir: Path, force: bool = False) -> Path:
     """Ensure `.ogna/docker-compose.core.yaml` and `.ogna/docker-compose.storage.yaml` exist."""
     ogna_dir = project_dir / ".ogna"
@@ -119,22 +124,26 @@ def cmd_init(args: argparse.Namespace) -> int:
     env_content = ENV_TEMPLATE.format(
         postgres_password=_generate_secret(32),
         project_db=sanitized_db,
-        encryption_key=_generate_secret(50),
-        jwt_secret=_generate_secret(50),
         api_image=api_image,
         s3_secret=_generate_secret(32),
         hasura_secret=_generate_secret(40),
-        gateway_db_password=_generate_secret(40),
+        auth_admin_password=_generate_password(),
+        zitadel_masterkey=_generate_secret(32),
+        zitadel_db_password=_generate_secret(40),
+        zitadel_cookie_secret=_generate_secret(48),
+        internal_jwt_secret=_generate_secret(50),
     )
     env_example_content = ENV_TEMPLATE.format(
         postgres_password="change_me_postgres_password",
         project_db=sanitized_db,
-        encryption_key="change_me_50_char_encryption_key_000000000000000000",
-        jwt_secret="change_me_50_char_gotrue_jwt_secret_000000000000000",
         api_image=api_image,
         s3_secret="rustfsadmin",
         hasura_secret="change_me_hasura_admin_secret",
-        gateway_db_password="change_me_gateway_db_password",
+        auth_admin_password="change_me_admin_password",
+        zitadel_masterkey="change_me_exactly_32_characters_",
+        zitadel_db_password="change_me_zitadel_db_password",
+        zitadel_cookie_secret="change_me_login_cookie_secret_at_least_32_chars",
+        internal_jwt_secret="change_me_internal_jwt_secret",
     )
 
     created_files: list[str] = [".ogna/docker-compose.core.yaml", ".ogna/docker-compose.storage.yaml"]
@@ -575,7 +584,7 @@ def build_parser() -> argparse.ArgumentParser:
     p_track.add_argument("table", help="Table name, optionally prefixed with schema (e.g. public.profiles)")
     p_track.add_argument(
         "--owner-column",
-        help="Optional UUID column referencing auth.users(id) (e.g. user_id or owner) to scope row-level permissions to X-Hasura-User-Id",
+        help="Optional column holding the user's id (TEXT; e.g. user_id or owner) to scope row-level permissions to X-Hasura-User-Id",
     )
     p_track.add_argument(
         "--columns",
