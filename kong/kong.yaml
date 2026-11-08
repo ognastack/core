@@ -39,6 +39,101 @@ services:
           size_unit: megabytes
 
   ##################################
+  # GoTrue credential endpoints: strict per-IP limits against brute force and
+  # signup / email spam (OGNA_AUTH_RATE_LIMIT_MINUTE / _HOUR). Longer paths win
+  # over /auth in Kong's router, so these take precedence.
+  ##################################
+  - name: gotrue-token-service
+    url: http://gotrue:9999/token
+    routes:
+      - name: gotrue-token-route
+        paths:
+          - /auth/token
+    plugins:
+      - name: rate-limiting
+        config:
+          minute: ${OGNA_AUTH_RATE_LIMIT_MINUTE}
+          hour: ${OGNA_AUTH_RATE_LIMIT_HOUR}
+          policy: local
+          hide_client_headers: true
+      - name: request-size-limiting
+        config:
+          allowed_payload_size: 1
+          size_unit: megabytes
+
+  - name: gotrue-signup-service
+    url: http://gotrue:9999/signup
+    routes:
+      - name: gotrue-signup-route
+        paths:
+          - /auth/signup
+    plugins:
+      - name: rate-limiting
+        config:
+          minute: ${OGNA_AUTH_RATE_LIMIT_MINUTE}
+          hour: ${OGNA_AUTH_RATE_LIMIT_HOUR}
+          policy: local
+          hide_client_headers: true
+      - name: request-size-limiting
+        config:
+          allowed_payload_size: 1
+          size_unit: megabytes
+
+  - name: gotrue-recover-service
+    url: http://gotrue:9999/recover
+    routes:
+      - name: gotrue-recover-route
+        paths:
+          - /auth/recover
+    plugins:
+      - name: rate-limiting
+        config:
+          minute: ${OGNA_AUTH_RATE_LIMIT_MINUTE}
+          hour: ${OGNA_AUTH_RATE_LIMIT_HOUR}
+          policy: local
+          hide_client_headers: true
+      - name: request-size-limiting
+        config:
+          allowed_payload_size: 1
+          size_unit: megabytes
+
+  - name: gotrue-otp-service
+    url: http://gotrue:9999/otp
+    routes:
+      - name: gotrue-otp-route
+        paths:
+          - /auth/otp
+    plugins:
+      - name: rate-limiting
+        config:
+          minute: ${OGNA_AUTH_RATE_LIMIT_MINUTE}
+          hour: ${OGNA_AUTH_RATE_LIMIT_HOUR}
+          policy: local
+          hide_client_headers: true
+      - name: request-size-limiting
+        config:
+          allowed_payload_size: 1
+          size_unit: megabytes
+
+  - name: gotrue-magiclink-service
+    url: http://gotrue:9999/magiclink
+    routes:
+      - name: gotrue-magiclink-route
+        paths:
+          - /auth/magiclink
+    plugins:
+      - name: rate-limiting
+        config:
+          minute: ${OGNA_AUTH_RATE_LIMIT_MINUTE}
+          hour: ${OGNA_AUTH_RATE_LIMIT_HOUR}
+          policy: local
+          hide_client_headers: true
+      - name: request-size-limiting
+        config:
+          allowed_payload_size: 1
+          size_unit: megabytes
+
+  ##################################
   # Dashboard (PUBLIC)
   ##################################
   - name: dashboard
@@ -132,17 +227,8 @@ plugins:
   ##################################
   - name: cors
     config:
-      origins:
-        - http://localhost
-        - http://127.0.0.1
-        - https://localhost
-        - https://127.0.0.1
-        - http://localhost:3000
-        - http://127.0.0.1:3000
-        - http://localhost:5173
-        - http://127.0.0.1:5173
-        - http://localhost:8000
-        - http://127.0.0.1:8000
+      # Rendered from OGNA_CORS_ORIGINS (comma-separated) by the entrypoint
+      origins: ${OGNA_CORS_ORIGINS}
       methods:
         - GET
         - POST
