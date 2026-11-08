@@ -8,7 +8,7 @@ IAM_OWNER service-account PAT that Zitadel writes on first start, it ensures:
   token introspection, written to $BOOTSTRAP_DIR/gateway-client.env,
 * an OIDC app "ogna-web" (PKCE, no secret, opaque access tokens) for user-facing
   apps, whose redirect URIs are kept in sync with OGNA_OIDC_REDIRECT_URIS,
-  written to $BOOTSTRAP_DIR/web-client.json.
+  written to $PUBLIC_DIR/web-client.json (safe to share with frontends).
 
 Only the Python standard library is used.
 """
@@ -24,7 +24,10 @@ import urllib.request
 BOOTSTRAP_DIR = os.environ.get("BOOTSTRAP_DIR", "/zitadel/bootstrap")
 ADMIN_PAT_PATH = os.path.join(BOOTSTRAP_DIR, "admin.pat")
 GATEWAY_ENV_PATH = os.path.join(BOOTSTRAP_DIR, "gateway-client.env")
-WEB_CLIENT_PATH = os.path.join(BOOTSTRAP_DIR, "web-client.json")
+# Public (non-secret) login settings go to a separate directory so frontends can
+# mount it without seeing the admin PAT or gateway credentials.
+PUBLIC_DIR = os.environ.get("PUBLIC_DIR", "/zitadel/public")
+WEB_CLIENT_PATH = os.path.join(PUBLIC_DIR, "web-client.json")
 
 ZITADEL_URL = os.environ.get("ZITADEL_INTERNAL_URL", "http://zitadel:8080").rstrip("/")
 AUTH_DOMAIN = os.environ["OGNA_AUTH_DOMAIN"]
@@ -225,6 +228,7 @@ def ensure_web_app(z, project_id):
         "post_logout_redirect_uris": logout_uris,
         "scopes": "openid profile email offline_access",
     }
+    os.makedirs(PUBLIC_DIR, exist_ok=True)
     write_file(WEB_CLIENT_PATH, json.dumps(info, indent=2) + "\n", 0o644)
     log(f"OIDC issuer:    {info['issuer']}")
     log(f"OIDC client_id: {client_id}")

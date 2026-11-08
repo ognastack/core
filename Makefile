@@ -30,7 +30,7 @@ env: ## Create .env from .env.example (with generated secrets) if missing
 	fi
 
 auth-info: ## Show the OIDC issuer and client id for your frontends
-	@docker run --rm --volumes-from zitadel-setup alpine cat /zitadel/bootstrap/web-client.json
+	@docker run --rm --volumes-from zitadel-setup alpine cat /zitadel/public/web-client.json
 
 up: env ## Stand up the full stack (Core + API + local RustFS S3)
 	$(COMPOSE_FULL) up -d --build

@@ -162,6 +162,7 @@ CORE_COMPOSE_YAML = """services:
       OGNA_OIDC_POST_LOGOUT_URIS: ${OGNA_OIDC_POST_LOGOUT_URIS:-http://localhost:8000/,http://localhost:3000/,http://localhost:5173/}
     volumes:
       - zitadel_bootstrap:/zitadel/bootstrap:rw
+      - zitadel_public:/zitadel/public:rw
     networks:
       - auth
     depends_on:
@@ -249,6 +250,8 @@ CORE_COMPOSE_YAML = """services:
         condition: service_healthy
     networks:
       - api
+    volumes:
+      - zitadel_public:/zitadel/public:ro
 
   hasura:
     image: ${OGNA_HASURA_IMAGE:-ghcr.io/ognastack/hasura:main}
@@ -285,6 +288,8 @@ CORE_COMPOSE_YAML = """services:
 
 volumes:
   zitadel_bootstrap:
+    driver: local
+  zitadel_public:
     driver: local
   postgres_data:
     driver: local

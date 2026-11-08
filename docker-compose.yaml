@@ -174,6 +174,7 @@ services:
       OGNA_OIDC_POST_LOGOUT_URIS: ${OGNA_OIDC_POST_LOGOUT_URIS:-http://localhost:8000/,http://localhost:3000/,http://localhost:5173/}
     volumes:
       - zitadel_bootstrap:/zitadel/bootstrap:rw
+      - zitadel_public:/zitadel/public:rw
     networks:
       - auth
     depends_on:
@@ -269,8 +270,8 @@ services:
         condition: service_healthy
     networks:
       - api
-    env_file:
-      - .env
+    volumes:
+      - zitadel_public:/zitadel/public:ro
 
   hasura:
     image: ghcr.io/ognastack/hasura:main
@@ -314,6 +315,8 @@ services:
 
 volumes:
   zitadel_bootstrap:
+    driver: local
+  zitadel_public:
     driver: local
   postgres_data:
     driver: local
