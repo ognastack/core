@@ -10,10 +10,20 @@ help: ## Show available Make targets
 	@echo ""
 	@grep -E '^[a-zA-Z0-9_-]+:.*?## .*$$' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-18s\033[0m %s\n", $$1, $$2}'
 
-env: ## Create .env from .env.example if missing
+env: ## Create .env from .env.example (with generated secrets) if missing
 	@if [ ! -f .env ]; then \
 		cp .env.example .env; \
-		echo "Created .env from .env.example"; \
+		gen() { openssl rand -hex 24 2>/dev/null || python3 -c 'import secrets; print(secrets.token_hex(24))'; }; \
+		pg=$$(gen); \
+		sed -i.bak \
+			-e "s|^POSTGRES_PASSWORD=change_me.*|POSTGRES_PASSWORD=$$pg|" \
+			-e "s|^POSTGRES_NON_ROOT_PASSWORD=change_me.*|POSTGRES_NON_ROOT_PASSWORD=$$pg|" \
+			-e "s|^ENCRYPTION_KEY=change_me.*|ENCRYPTION_KEY=$$(gen)|" \
+			-e "s|^GOTRUE_JWT_SECRET=change_me.*|GOTRUE_JWT_SECRET=$$(gen)|" \
+			-e "s|^OGNA_GATEWAY_DB_PASSWORD=change_me.*|OGNA_GATEWAY_DB_PASSWORD=$$(gen)|" \
+			-e "s|^HASURA_GRAPHQL_ADMIN_SECRET=change_me.*|HASURA_GRAPHQL_ADMIN_SECRET=$$(gen)|" \
+			.env && rm -f .env.bak; \
+		echo "Created .env from .env.example with generated secrets"; \
 	fi
 
 up: env ## Stand up the full stack (Core + API + local RustFS S3)

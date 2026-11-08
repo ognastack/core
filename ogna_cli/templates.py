@@ -22,10 +22,13 @@ CORE_COMPOSE_YAML = """services:
       KONG_LOG_LEVEL: ${KONG_LOG_LEVEL:-notice}
       KONG_DATABASE: "off"
       KONG_DECLARATIVE_CONFIG: /kong/kong.yaml
-      GOTRUE_JWT_SECRET: ${GOTRUE_JWT_SECRET}
+      GOTRUE_JWT_SECRET: ${GOTRUE_JWT_SECRET:?GOTRUE_JWT_SECRET must be set}
       POSTGRES_DB: ${POSTGRES_DB}
       OGNA_GATEWAY_DB_PASSWORD: ${OGNA_GATEWAY_DB_PASSWORD}
       OGNA_EXTRA_ROUTES: ${OGNA_EXTRA_ROUTES:-}
+      OGNA_CORS_ORIGINS: ${OGNA_CORS_ORIGINS:-}
+      OGNA_AUTH_RATE_LIMIT_MINUTE: ${OGNA_AUTH_RATE_LIMIT_MINUTE:-10}
+      OGNA_AUTH_RATE_LIMIT_HOUR: ${OGNA_AUTH_RATE_LIMIT_HOUR:-100}
       KONG_PROXY_LISTEN: 0.0.0.0:8000, 0.0.0.0:8443 ssl
     ports:
       - "${OGNA_HTTP_PORT:-80}:8000"
@@ -52,12 +55,11 @@ CORE_COMPOSE_YAML = """services:
       - database
 
   gotrue:
-    image: bitnamilegacy/gotrue:2.178.0
-    platform: linux/amd64
+    image: supabase/auth:v2.178.0
     environment:
-      GOTRUE_DISABLE_SIGNUP: "false"
-      GOTRUE_MAILER_AUTOCONFIRM: "true"
-      MAILER_AUTOCONFIRM: "true"
+      GOTRUE_DISABLE_SIGNUP: ${GOTRUE_DISABLE_SIGNUP:-false}
+      GOTRUE_MAILER_AUTOCONFIRM: ${GOTRUE_MAILER_AUTOCONFIRM:-true}
+      GOTRUE_URI_ALLOW_LIST: ${GOTRUE_URI_ALLOW_LIST:-}
       GOTRUE_API_HOST: "0.0.0.0"
       GOTRUE_API_PORT: 9999
       GOTRUE_DB_DRIVER: "postgres"
@@ -78,7 +80,7 @@ CORE_COMPOSE_YAML = """services:
       - api
       - database
     healthcheck:
-      test: ["CMD-SHELL", "ps | grep '[g]otrue'"]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9999/health"]
       interval: 5s
       timeout: 3s
       retries: 5
