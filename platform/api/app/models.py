@@ -174,6 +174,12 @@ class SetPlanRequest(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class Region(BaseModel):
+    id: str
+    name: str
+    is_default: bool = False
+
+
 class AccountView(BaseModel):
     user_id: str
     plan: Plan

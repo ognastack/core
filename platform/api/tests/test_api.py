@@ -33,6 +33,11 @@ def test_requires_gateway_identity(client):
     assert client.get("/v1/health/").status_code == 200
 
 
+def test_regions(client):
+    r = client.get("/v1/regions", headers=as_user())
+    assert r.status_code == 200 and r.json()[0] == {"id": "fsn1", "name": "Falkenstein, DE", "is_default": True}
+
+
 def test_project_lifecycle_over_http(client):
     r = client.post("/v1/projects", json={"name": "Shop"}, headers=as_user())
     assert r.status_code == 202, r.text
@@ -45,11 +50,14 @@ def test_project_lifecycle_over_http(client):
 
     r = client.post("/v1/projects", json={"name": "Second"}, headers=as_user())
     assert r.status_code == 403 and r.json()["error"]["code"] == "quota_exceeded"
+    assert r.json()["message"] == "Your plan allows 1 project(s)"  # what @ogna/js shows as error.msg
 
     r = client.post(f"/v1/projects/{pid}/deployments", json={"backend_image": IMG}, headers=as_user())
     assert r.status_code == 201 and r.json()["version"] == 1
     r = client.post(f"/v1/projects/{pid}/deployments", json={"backend_image": "nope"}, headers=as_user())
     assert r.status_code == 422
+    assert r.json()["message"].startswith("backend_image: ")
+    assert r.json()["error_code"] == "invalid_request"
 
     r = client.get(f"/v1/projects/{pid}/desired-state", headers=as_user())
     assert r.json()["backend_image"] == IMG

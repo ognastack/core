@@ -13,6 +13,7 @@ import logging
 from typing import Optional
 
 from fastapi import BackgroundTasks, Depends, FastAPI, Header, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 
 from .config import Settings
@@ -20,7 +21,7 @@ from .errors import Forbidden, PlatformError
 from .http import HttpxClient
 from .models import (
     AccountView, CreateProjectRequest, DeployRequest, Deployment, DesiredState, Event,
-    Plan, ProjectView, SetPlanRequest,
+    Plan, ProjectView, Region, SetPlanRequest,
 )
 from .providers.fake import FakeProvider
 from .providers.hetzner import HetznerProvider
@@ -75,9 +76,24 @@ def create_app(service: Optional[PlatformService] = None) -> FastAPI:
 
     app = FastAPI(title="OGNA platform API", root_path="/api", lifespan=lifespan)
 
+    def _error_body(code: str, message: str, **extra) -> dict:
+        # Top-level `message`/`error_code` are what @ogna/js surfaces as error.msg / error.error_code
+        return {"error": {"code": code, "message": message}, "message": message, "error_code": code, **extra}
+
     @app.exception_handler(PlatformError)
     async def _platform_error(_: Request, exc: PlatformError):
-        return JSONResponse(status_code=exc.status_code, content={"error": {"code": exc.code, "message": exc.message}})
+        return JSONResponse(status_code=exc.status_code, content=_error_body(exc.code, exc.message))
+
+    @app.exception_handler(RequestValidationError)
+    async def _validation_error(_: Request, exc: RequestValidationError):
+        problems = []
+        for err in exc.errors():
+            field = ".".join(str(p) for p in err.get("loc", ()) if p not in ("body", "query", "path"))
+            msg = str(err.get("msg", "invalid")).removeprefix("Value error, ")
+            problems.append(f"{field}: {msg}" if field else msg)
+        return JSONResponse(status_code=422, content=_error_body(
+            "invalid_request", "; ".join(problems) or "Invalid request",
+            details=[{"loc": list(e.get("loc", ())), "msg": str(e.get("msg", ""))} for e in exc.errors()]))
 
     def svc(request: Request) -> PlatformService:
         return request.app.state.service
@@ -95,6 +111,10 @@ def create_app(service: Optional[PlatformService] = None) -> FastAPI:
     @app.get("/v1/plans", response_model=list[Plan])
     async def list_plans(s: PlatformService = Depends(svc), _: str = Depends(current_user)):
         return await s.list_plans()
+
+    @app.get("/v1/regions", response_model=list[Region])
+    async def list_regions(s: PlatformService = Depends(svc), _: str = Depends(current_user)):
+        return s.list_regions()
 
     @app.get("/v1/account", response_model=AccountView)
     async def get_account(s: PlatformService = Depends(svc), user: str = Depends(current_user)):

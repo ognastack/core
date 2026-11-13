@@ -1,6 +1,6 @@
 # OGNA platform (control plane)
 
-The service where people sign in, pick a plan and create **projects**. Each project gets its own VPS running an OGNA stack. It is built **on OGNA itself**: this folder is an ordinary OGNA project, and `api/` is its pluggable backend.
+The service where people sign in, pick a plan and create **projects**: an API (`api/`) and a web UI (`ui/`). Each project gets its own VPS running an OGNA stack. It is built **on OGNA itself**: this folder is an ordinary OGNA project, and `api/` is its pluggable backend.
 
 ```
 ┌──────────────── control plane (this folder, one OGNA stack) ───────────────┐
@@ -26,6 +26,17 @@ The service where people sign in, pick a plan and create **projects**. Each proj
 - **Each VPS boots with cloud-init** (`app/cloudinit.py`): Docker, `ufw` (SSH, 80, 443 only), no password logins, automatic security updates, fail2ban, and `/etc/ogna/agent.env` (root-only) holding the control-plane URL, project id and a **one-time enrollment token**. Only its SHA-256 is stored, so the future agent can enroll without anyone handling secrets by hand.
 - **Deployments are immutable versions.** Each one records `stack_version` (`main` or `1.4.2`), `backend_image` (tag or, preferably, `@sha256:` digest; tag-only deploys are flagged in the event log), and non-secret `config` (UPPER_SNAKE keys; platform-owned prefixes like `OGNA_`, `HASURA_`, `POSTGRES_` are rejected). A rollback creates a **new** version copying an old one, so history is never rewritten.
 
+## Web UI
+
+`ui/` is built from the [OGNA frontend template](https://github.com/ognastack/ogna-fe-template) (Next.js + shadcn/ui + `@ogna/js`) and replaces the stack's default dashboard, so it's served at `/` on the same origin as the API.
+
+- **Sign up / log in:** the template's forms, backed by the stack's auth.
+- **Projects** (`/protected/projects`): your projects with live status (polls every 5s while one is provisioning or deleting), plan usage, and a **New project** panel with name and region.
+- **Project page** (`/protected/projects/<id>`): overview, server (type, location, IPs), **Deploy** (image, stack version, settings), **Deployments** with one-click rollback, **Events**, and the **Desired state** the agent will apply. **Delete** asks you to type the project slug.
+- **Plan & usage** (`/protected/account`): current plan, usage, all plans, and, for platform admins, a form to change a user's plan.
+
+For local development against a running stack: `cd ui && npm ci && NEXT_PUBLIC_OGNA_URL=http://localhost:8000 npm run dev`.
+
 ## API
 
 All routes are under `/api/v1` and require a signed-in user.
@@ -33,6 +44,7 @@ All routes are under `/api/v1` and require a signed-in user.
 | Method & path | Description |
 |---|---|
 | `GET /plans` | Active plans (size, project limit, price) |
+| `GET /regions` | Regions users can pick (`OGNA_PLATFORM_REGIONS`, first is the default) |
 | `GET /account` | Your plan and usage. The account is created on first call, on the default plan |
 | `PUT /admin/accounts/{user_id}/plan` | Change a user's plan (only `OGNA_PLATFORM_ADMIN_USER_IDS`; refuses downgrades below current usage) |
 | `POST /projects` `{name, region?}` | Create a project (`202`, provisioning starts immediately); `403 quota_exceeded` at the plan limit |
@@ -45,7 +57,7 @@ All routes are under `/api/v1` and require a signed-in user.
 | `POST /projects/{id}/deployments/{version}/rollback` | New version copying `version` |
 | `GET /projects/{id}/desired-state` | What the VPS should run (the future agent's input) |
 
-Errors look like `{"error": {"code": "quota_exceeded", "message": "Your plan allows 1 project(s)"}}`.
+Errors look like `{"error": {"code": "quota_exceeded", "message": "Your plan allows 1 project(s)"}, "message": "…", "error_code": "quota_exceeded"}`. The top-level fields are what `@ogna/js` returns as `error.msg` / `error.error_code`; validation errors are summarized as `"field: problem"`.
 
 Plans live in `platform.plans`, seeded with Hetzner's current shared line: `hobby` → `cx23` (1 project), `pro` → `cx33` (3), `business` → `cx43` (10). Edit the rows to change sizes or limits without a deploy, e.g. if a server type is out of stock. Prices are informational; there is no billing yet.
 
@@ -55,8 +67,10 @@ Plans live in `platform.plans`, seeded with Hetzner's current shared line: `hobb
 cd platform
 ogna init . --name ogna-platform        # creates .ogna/ and .env; keeps the files here
 cat .env.platform.example >> .env       # then edit: provider, token, admins…
-ogna up --build -d
+ogna up --build -d                       # builds api/ and ui/
 ```
+
+Then open http://localhost:8000, sign up, and create a project.
 
 Start with `OGNA_PLATFORM_PROVIDER=fake`: servers are simulated, so you can click through the whole flow for free. Switch to `hetzner` with a project API token (Hetzner Console → Security → API tokens, read & write) when ready. **Real servers are billed** until the project is deleted.
 

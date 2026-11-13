@@ -26,6 +26,13 @@ async def test_account_is_created_on_default_plan(env):
     assert "alice" in repo.accounts
 
 
+async def test_regions_come_from_settings(env):
+    service, _, _ = env
+    regions = service.list_regions()
+    assert [(r.id, r.name, r.is_default) for r in regions] == [
+        ("fsn1", "Falkenstein, DE", True), ("nbg1", "Nuremberg, DE", False)]
+
+
 async def test_invalid_user_id_is_rejected(env):
     service, _, _ = env
     with pytest.raises(Forbidden):

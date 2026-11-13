@@ -15,7 +15,7 @@ from .config import Settings
 from .errors import Conflict, Forbidden, InvalidRequest, NotFound, ProviderError, QuotaExceeded
 from .models import (
     AccountView, CreateProjectRequest, DeployRequest, Deployment, DesiredState, Event,
-    Plan, Project, ProjectView, Server,
+    Plan, Project, ProjectView, Region, Server,
 )
 from .providers import PROJECT_LABEL, Provider, ProviderServer, ServerSpec
 from .repository import Repository
@@ -24,6 +24,11 @@ log = logging.getLogger("ogna.platform")
 
 USER_ID = re.compile(r"^[A-Za-z0-9_.@-]{1,128}$")
 _IN_TRANSITION = ("provisioning", "deleting")
+# Display names for Hetzner locations; unknown ids are shown as-is
+REGION_NAMES = {
+    "fsn1": "Falkenstein, DE", "nbg1": "Nuremberg, DE", "hel1": "Helsinki, FI",
+    "ash": "Ashburn, US", "hil": "Hillsboro, US", "sin": "Singapore",
+}
 
 
 def utcnow() -> datetime:
@@ -93,6 +98,10 @@ class PlatformService:
         return ProjectView(project=project, server=server, current_deployment=current, url=self._url(project))
 
     # ------------------------------------------------------------ plans/account
+    def list_regions(self) -> list[Region]:
+        return [Region(id=r, name=REGION_NAMES.get(r, r), is_default=(r == self.settings.default_region))
+                for r in self.settings.regions]
+
     async def list_plans(self) -> list[Plan]:
         return await self.repo.list_plans()
 
