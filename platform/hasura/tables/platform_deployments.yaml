@@ -1,0 +1,11 @@
+table:
+  schema: platform
+  name: deployments
+
+select_permissions:
+  - role: authenticated
+    permission:
+      columns: [id, project_id, version, stack_version, backend_image, config, reason, rolled_back_from, created_by, created_at]
+      filter:
+        owner_id:
+          _eq: X-Hasura-User-Id

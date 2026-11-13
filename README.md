@@ -382,6 +382,12 @@ To rotate `OGNA_GATEWAY_DB_PASSWORD` later, run `ALTER ROLE ogna_gateway PASSWOR
 
 ---
 
+## Platform (control plane, work in progress)
+
+[`platform/`](platform/README.md) is the service where users sign in, pick a plan and create projects, each on its own VPS. It's built as an ordinary OGNA project: its backend is a FastAPI service talking to Hasura, with quotas and deploy versions enforced in Postgres.
+
+---
+
 ## License
 
 MIT License

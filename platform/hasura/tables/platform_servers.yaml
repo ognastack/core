@@ -1,0 +1,12 @@
+table:
+  schema: platform
+  name: servers
+
+# enrollment_token_hash is intentionally not exposed
+select_permissions:
+  - role: authenticated
+    permission:
+      columns: [id, project_id, provider, name, server_type, location, ipv4, ipv6, status, created_at, updated_at]
+      filter:
+        owner_id:
+          _eq: X-Hasura-User-Id

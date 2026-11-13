@@ -1,0 +1,46 @@
+table:
+  schema: platform
+  name: projects
+
+object_relationships:
+  - name: plan
+    using:
+      foreign_key_constraint_on: plan_id
+  - name: server
+    using:
+      manual_configuration:
+        remote_table:
+          schema: platform
+          name: servers
+        column_mapping:
+          id: project_id
+
+array_relationships:
+  - name: deployments
+    using:
+      foreign_key_constraint_on:
+        table:
+          schema: platform
+          name: deployments
+        column: project_id
+  - name: events
+    using:
+      foreign_key_constraint_on:
+        table:
+          schema: platform
+          name: events
+        column: project_id
+
+# Read-only for users (e.g. live status in the dashboard via subscriptions).
+# All changes go through the platform API, which talks to the provider.
+select_permissions:
+  - role: authenticated
+    permission:
+      columns: [id, name, slug, plan_id, server_type, region, status, status_detail, current_version, created_at, updated_at]
+      filter:
+        _and:
+          - owner_id:
+              _eq: X-Hasura-User-Id
+          - status:
+              _neq: deleted
+      allow_aggregations: true

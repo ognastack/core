@@ -1,0 +1,34 @@
+# OGNA control plane: an ordinary OGNA project whose `api` is the platform API.
+# Run `ogna init .` once in this folder (creates .ogna/ and .env), add the
+# platform settings below to .env, then `ogna up --build`.
+services:
+  migrations:
+    volumes:
+      - ./migrations:/db/migrations:ro
+
+  hasura:
+    volumes:
+      - ./hasura/tables:/user-hasura/tables:ro
+
+  api:
+    image: ${API_IMAGE:-ogna-platform-api:dev}
+    build:
+      context: ./api
+    container_name: api
+    restart: unless-stopped
+    depends_on:
+      - postgres
+      - kong-cp
+    expose:
+      - "8000"
+    networks:
+      - gql
+      - api
+    env_file:
+      - .env
+
+  # The platform's web UI replaces the stack's default dashboard (served at /)
+  dashboard:
+    image: ${OGNA_PLATFORM_UI_IMAGE:-ogna-platform-ui:dev}
+    build:
+      context: ./ui
