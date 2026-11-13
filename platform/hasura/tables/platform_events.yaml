@@ -1,0 +1,11 @@
+table:
+  schema: platform
+  name: events
+
+select_permissions:
+  - role: authenticated
+    permission:
+      columns: [id, project_id, kind, message, created_at]
+      filter:
+        owner_id:
+          _eq: X-Hasura-User-Id

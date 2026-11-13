@@ -1,0 +1,11 @@
+table:
+  schema: platform
+  name: plans
+
+select_permissions:
+  - role: authenticated
+    permission:
+      columns: [id, name, server_type, max_projects, monthly_price_cents, is_default, sort_order]
+      filter:
+        active:
+          _eq: true
